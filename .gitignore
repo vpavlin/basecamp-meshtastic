@@ -1,0 +1,8 @@
+# nix build artifacts (symlinks into /nix/store)
+result
+result-*
+gateway/result
+ui/result
+# python
+__pycache__/
+*.pyc
