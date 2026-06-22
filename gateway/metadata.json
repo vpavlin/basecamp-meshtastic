@@ -1,0 +1,18 @@
+{
+  "name": "meshtastic_gateway",
+  "version": "0.1.0",
+  "type": "core",
+  "category": "network",
+  "description": "Meshtastic Gateway — discover a connected Meshtastic node and bridge its channels to/from Logos Messaging topics",
+  "main": "meshtastic_gateway_plugin",
+  "dependencies": [],
+  "events": ["channelsChanged", "nodeStatus", "messagesChanged"],
+  "nix": {
+    "packages": {
+      "build": ["protobuf", "qt6.qtserialport", "qt6.qtbase"],
+      "runtime": ["protobuf", "qt6.qtserialport", "qt6.qtbase"]
+    },
+    "external_libraries": [],
+    "cmake": {}
+  }
+}

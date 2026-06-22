@@ -1,0 +1,15 @@
+{
+  "name": "meshtastic_gateway_ui",
+  "version": "1.0.0",
+  "type": "ui_qml",
+  "category": "network",
+  "description": "Meshtastic Gateway — pick which of a connected node's channels to bridge to Logos Messaging",
+  "view": "Main.qml",
+  "icon": "meshtastic.png",
+  "dependencies": ["meshtastic_gateway", "qr"],
+  "nix": {
+    "packages": { "build": [], "runtime": [] },
+    "external_libraries": [],
+    "cmake": { "find_packages": [], "extra_sources": [] }
+  }
+}
