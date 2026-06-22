@@ -5,7 +5,7 @@
   "category": "network",
   "description": "Meshtastic Gateway — discover a connected Meshtastic node and bridge its channels to/from Logos Messaging topics",
   "main": "meshtastic_gateway_plugin",
-  "dependencies": [],
+  "dependencies": ["delivery_module"],
   "events": ["channelsChanged", "nodeStatus", "messagesChanged"],
   "nix": {
     "packages": {

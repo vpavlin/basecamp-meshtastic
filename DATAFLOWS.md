@@ -94,7 +94,7 @@ user ──▶ Gateway [origin=local]
 
 ## Implementation — how each leg actually connects (code map)
 
-Both legs are now implemented (the mesh leg is built but not yet verified against a physical radio).
+Both legs are implemented and verified against a physical Meshtastic node (bidirectional).
 Everything lives in `gateway/src/meshtastic_gateway_plugin.cpp`.
 
 ### Mesh leg — native USB serial (QtSerialPort + meshtastic protobufs)
@@ -140,9 +140,6 @@ onDeliveryMessage()     messageReceived event [hash, topic, payloadB64, ts] → 
 | the one suppression rule                   | `maybeRelay()` / the `m_seen` check in `onDeliveryMessage()`+`onMeshMessage()` |
 | relay toggle → (un)subscribe T(N)          | `setRelay()`                                           |
 
-> Dev/demo without a radio: set `MESHTASTIC_GATEWAY_STUB=1` to keep the seeded channels/nodes/messages
-> instead of opening the serial port.
-
 ## Anti-spam guarantees (why neither network gets flooded)
 
 1. **Loop prevention** — the `seen` fingerprint set above. This is the one that prevents the
@@ -160,7 +157,7 @@ onDeliveryMessage()     messageReceived event [hash, topic, payloadB64, ts] → 
 5. **Bounded, expiring dedup state** — `seen` is capped and entries expire, so memory is bounded
    and legitimate repeats eventually pass.
 
-## Robust identity (production vs. stub)
+## Robust identity (current vs. future)
 
 Text-based fingerprints have one weakness: two *distinct* messages with identical text inside the
 dedup window collapse to one (one gets suppressed). Acceptable for a PoC, rare in practice.

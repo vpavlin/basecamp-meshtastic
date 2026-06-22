@@ -6,7 +6,7 @@
   "description": "Meshtastic Gateway — pick which of a connected node's channels to bridge to Logos Messaging",
   "view": "Main.qml",
   "icon": "meshtastic.png",
-  "dependencies": ["meshtastic_gateway"],
+  "dependencies": ["meshtastic_gateway", "qr"],
   "nix": {
     "packages": { "build": [], "runtime": [] },
     "external_libraries": [],
