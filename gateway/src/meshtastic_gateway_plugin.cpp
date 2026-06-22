@@ -23,6 +23,8 @@
 #include "meshtastic/channel.pb.h"
 #include "meshtastic/apponly.pb.h"
 #include <QRandomGenerator>
+#include <openssl/evp.h>
+#include <openssl/rand.h>
 
 MeshtasticGatewayPlugin::MeshtasticGatewayPlugin(QObject* parent) : QObject(parent) {}
 MeshtasticGatewayPlugin::~MeshtasticGatewayPlugin() = default;
@@ -441,9 +443,8 @@ bool MeshtasticGatewayPlugin::maybeRelay(int channelIndex, const QString& text, 
 
     // maybeRelay is the LM-publish direction (local send, or future mesh-inbound). Inbound LM
     // messages take the onDeliveryMessage() path instead.
-    const QString topic = topicFor(channelIndex);
-    qInfo() << "meshtastic_gateway: relay" << origin << "->LM" << topic << ":" << text;
-    publishToLM(topic, text);
+    qInfo() << "meshtastic_gateway: relay" << origin << "->LM ch" << channelIndex;
+    publishToLM(channelIndex, text);
     return true;
 }
 
@@ -511,19 +512,104 @@ void MeshtasticGatewayPlugin::subscribeRelayTopics()
     }
 }
 
-void MeshtasticGatewayPlugin::publishToLM(const QString& topic, const QString& text)
+// --- LM payload encryption (AES-256-GCM, key derived from the channel PSK) ----
+// The content topic only obscured *where* messages are; this keeps the *content* private on Waku too,
+// so a private channel stays private. Wire format of an encrypted payload: "ENC1:" + base64(iv|ct|tag).
+
+static QByteArray aesGcmEncrypt(const QByteArray& key, const QByteArray& plain)
+{
+    QByteArray iv(12, 0);
+    if (RAND_bytes(reinterpret_cast<unsigned char*>(iv.data()), 12) != 1) return QByteArray();
+    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+    if (!ctx) return QByteArray();
+    QByteArray ct(plain.size(), 0), tag(16, 0);
+    int len = 0, ctlen = 0;
+    bool ok =
+        EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), nullptr, nullptr, nullptr) == 1 &&
+        EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, 12, nullptr) == 1 &&
+        EVP_EncryptInit_ex(ctx, nullptr, nullptr,
+            reinterpret_cast<const unsigned char*>(key.constData()),
+            reinterpret_cast<const unsigned char*>(iv.constData())) == 1 &&
+        EVP_EncryptUpdate(ctx, reinterpret_cast<unsigned char*>(ct.data()), &len,
+            reinterpret_cast<const unsigned char*>(plain.constData()), int(plain.size())) == 1;
+    ctlen = len;
+    ok = ok && EVP_EncryptFinal_ex(ctx, reinterpret_cast<unsigned char*>(ct.data()) + len, &len) == 1;
+    ctlen += len;
+    ok = ok && EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, 16, tag.data()) == 1;
+    EVP_CIPHER_CTX_free(ctx);
+    if (!ok) return QByteArray();
+    ct.resize(ctlen);
+    return iv + ct + tag;
+}
+
+static bool aesGcmDecrypt(const QByteArray& key, const QByteArray& blob, QByteArray& outPlain)
+{
+    if (blob.size() < 12 + 16) return false;
+    const QByteArray iv = blob.left(12), tag = blob.right(16), ct = blob.mid(12, blob.size() - 28);
+    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+    if (!ctx) return false;
+    QByteArray plain(ct.size(), 0);
+    int len = 0;
+    bool ok =
+        EVP_DecryptInit_ex(ctx, EVP_aes_256_gcm(), nullptr, nullptr, nullptr) == 1 &&
+        EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, 12, nullptr) == 1 &&
+        EVP_DecryptInit_ex(ctx, nullptr, nullptr,
+            reinterpret_cast<const unsigned char*>(key.constData()),
+            reinterpret_cast<const unsigned char*>(iv.constData())) == 1 &&
+        EVP_DecryptUpdate(ctx, reinterpret_cast<unsigned char*>(plain.data()), &len,
+            reinterpret_cast<const unsigned char*>(ct.constData()), int(ct.size())) == 1;
+    int plen = len;
+    ok = ok && EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, 16,
+            const_cast<char*>(tag.constData())) == 1;
+    const int fin = ok ? EVP_DecryptFinal_ex(ctx, reinterpret_cast<unsigned char*>(plain.data()) + len, &len) : 0;
+    EVP_CIPHER_CTX_free(ctx);
+    if (!ok || fin != 1) return false;          // GCM auth failure: wrong key or tampered
+    plen += len;
+    plain.resize(plen);
+    outPlain = plain;
+    return true;
+}
+
+QByteArray MeshtasticGatewayPlugin::channelKey(int channelIndex) const
+{
+    QByteArray psk;
+    for (const auto& v : m_channels) {
+        const QJsonObject c = v.toObject();
+        if (c["channelIndex"].toInt() == channelIndex) {
+            psk = QByteArray::fromBase64(c["psk"].toString().toUtf8());
+            break;
+        }
+    }
+    if (psk.isEmpty()) return QByteArray();     // unencrypted channel -> no LM encryption
+    // Deterministic, domain-separated: every member shares name+psk, so all derive the same 32-byte key.
+    const QByteArray seed = QByteArray("meshtastic-gateway/lm-relay/v1\n") + psk;
+    return QCryptographicHash::hash(seed, QCryptographicHash::Sha256);
+}
+
+void MeshtasticGatewayPlugin::publishToLM(int channelIndex, const QString& text)
 {
     if (!m_deliveryReady || !m_delivery) {
-        qWarning() << "meshtastic_gateway: delivery not ready — dropping publish to" << topic;
+        qWarning() << "meshtastic_gateway: delivery not ready — dropping publish on ch" << channelIndex;
         return;
     }
-    // delivery_module.send(contentTopic, payload) base64-encodes payload itself -> pass raw text.
+    const QString topic = topicFor(channelIndex);
+
+    // Encrypt the payload for the internet leg so a private channel stays private on Waku (the topic
+    // alone was only obscurity). Channels with no PSK go plaintext (they're unencrypted on LoRa too).
+    QString payload = text;
+    const QByteArray key = channelKey(channelIndex);
+    if (!key.isEmpty()) {
+        const QByteArray blob = aesGcmEncrypt(key, text.toUtf8());
+        if (blob.isEmpty()) { qWarning() << "meshtastic_gateway: LM encrypt failed ch" << channelIndex; return; }
+        payload = QStringLiteral("ENC1:") + QString::fromLatin1(blob.toBase64());
+    }
+
     // Deferred (singleShot 0): publishToLM runs inside sendMessage(), a UI-synchronous callModule —
     // invokeRemoteMethodAsync can block ~20 s on a cold token/replica and would freeze the UI.
     LogosAPIClient* d = m_delivery;
-    QTimer::singleShot(0, this, [d, topic, text]() {
+    QTimer::singleShot(0, this, [d, topic, payload]() {
         d->invokeRemoteMethodAsync("delivery_module", "send",
-                                   QVariant(topic), QVariant(text), [](QVariant) {});
+                                   QVariant(topic), QVariant(payload), [](QVariant) {});
     });
 }
 
@@ -541,9 +627,24 @@ void MeshtasticGatewayPlugin::onDeliveryMessage(const QVariantList& data)
 {
     if (data.size() < 3) return;
     const QString topic = data[1].toString();
-    const QString text  = QString::fromUtf8(QByteArray::fromBase64(data[2].toString().toUtf8()));
+    const QString raw   = QString::fromUtf8(QByteArray::fromBase64(data[2].toString().toUtf8()));
     const int ch = channelForTopic(topic);
     if (ch < 0) return;                         // not one of our channels
+
+    // Decrypt if it's our ENC1 format; plaintext otherwise (no-PSK channel or a legacy sender).
+    QString text;
+    if (raw.startsWith(QStringLiteral("ENC1:"))) {
+        const QByteArray blob = QByteArray::fromBase64(raw.mid(5).toLatin1());
+        QByteArray plain;
+        const QByteArray key = channelKey(ch);
+        if (key.isEmpty() || !aesGcmDecrypt(key, blob, plain)) {
+            qWarning() << "meshtastic_gateway: LM decrypt failed ch" << ch << "— dropping";
+            return;                             // wrong key / tampered — don't inject garbage to mesh
+        }
+        text = QString::fromUtf8(plain);
+    } else {
+        text = raw;
+    }
 
     const QString fp = fingerprint(ch, text);
     if (m_seen.contains(fp)) {                  // our own publish echoing back — suppress (Flow A/C)

@@ -21,6 +21,7 @@ logos_module(
 # handle plaintext — no crypto here, just the StreamAPI message types.
 find_package(Protobuf REQUIRED)
 find_package(Qt6 REQUIRED COMPONENTS SerialPort Sql)
+find_package(OpenSSL REQUIRED)   # AES-256-GCM for the Logos Messaging relay payload
 
 set(MESH_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/proto_gen)
 file(MAKE_DIRECTORY ${MESH_GEN_DIR})
@@ -40,4 +41,5 @@ target_link_libraries(meshtastic_gateway_module_plugin PRIVATE
     protobuf::libprotobuf
     Qt6::SerialPort
     Qt6::Sql
+    OpenSSL::Crypto
 )

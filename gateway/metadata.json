@@ -9,8 +9,8 @@
   "events": ["channelsChanged", "nodeStatus", "messagesChanged"],
   "nix": {
     "packages": {
-      "build": ["protobuf", "qt6.qtserialport", "qt6.qtbase"],
-      "runtime": ["protobuf", "qt6.qtserialport", "qt6.qtbase"]
+      "build": ["protobuf", "qt6.qtserialport", "qt6.qtbase", "openssl"],
+      "runtime": ["protobuf", "qt6.qtserialport", "qt6.qtbase", "openssl"]
     },
     "external_libraries": [],
     "cmake": {}

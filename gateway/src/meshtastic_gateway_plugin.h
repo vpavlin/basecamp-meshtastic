@@ -103,8 +103,11 @@ private:
     void initDelivery();                                     // deferred: connect, createNode, start
     void setDeliveryState(const QString& s);                 // update + emitStatus only when changed
     void subscribeRelayTopics();                             // subscribe topics of relaying channels
-    void publishToLM(const QString& topic, const QString& text);
+    void publishToLM(int channelIndex, const QString& text); // encrypts payload (channelKey) then sends
     void onDeliveryMessage(const QVariantList& data);        // messageReceived: [hash,topic,b64,ts]
+    // AES-256-GCM key for a channel's LM payloads, derived from its PSK so every member derives the
+    // same key. Empty for channels with no PSK (those go plaintext, as they're unencrypted on LoRa too).
+    QByteArray channelKey(int channelIndex) const;
 
     // Meshtastic node over USB serial — speak the StreamAPI directly (QtSerialPort + protobuf),
     // in-process. Same data the stoa Python bridge reads. The radio decrypts on-air traffic, so
