@@ -1,0 +1,53 @@
+name: Release LGX
+
+# Build the portable .lgx packages for both modules and publish them.
+# - push a tag `v*`  -> builds + attaches the .lgx files to a GitHub Release
+# - manual dispatch  -> builds + uploads the .lgx files as workflow artifacts
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+
+      # Portable bundles use canonical variant names (linux-amd64, not -dev) so the
+      # Basecamp package manager accepts them — NEVER build .#lgx for a release.
+      - name: Build gateway (core) .lgx
+        run: nix build ./gateway#lgx-portable -o gateway-lgx --print-out-paths
+
+      - name: Build ui (ui_qml) .lgx
+        run: nix build ./ui#lgx-portable -o ui-lgx --print-out-paths
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p dist
+          cp -L gateway-lgx/*.lgx dist/
+          cp -L ui-lgx/*.lgx dist/
+          ls -la dist
+
+      - name: Upload as workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lgx
+          path: dist/*.lgx
+          if-no-files-found: error
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.lgx
+          fail_on_unmatched_files: true
