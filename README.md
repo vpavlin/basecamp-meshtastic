@@ -29,6 +29,20 @@ channel maps to a content topic `md5(name+psk)[:16]` (or `md5("idx:N")` when unn
 - **Node config** — set the node's owner name from the UI (via `AdminMessage`).
 - **Settings** — message-retention cap, "online" activity window, distance units (km/mi).
 
+## Screenshots
+
+**Nodes & map** — the mesh NodeDB with a relative-plot map (peers by distance + bearing, range rings, zoom):
+
+![Nodes view with relative-plot map](docs/nodes-map.png)
+
+**Channels & relay** — a channel bridged to Logos Messaging (here the public `LM Relayed1` test channel):
+
+![A channel relayed to Logos Messaging](docs/channels-relay.png)
+
+**Settings** — node name, history retention, "online" window, units; per-channel relay toggle + share:
+
+![Settings modal](docs/settings.png)
+
 ## Install
 
 You need **Basecamp** and a **Meshtastic node connected over USB**. Install the two dependencies first,
