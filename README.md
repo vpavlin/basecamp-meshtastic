@@ -29,17 +29,43 @@ channel maps to a content topic `md5(name+psk)[:16]` (or `md5("idx:N")` when unn
 - **Node config** — set the node's owner name from the UI (via `AdminMessage`).
 - **Settings** — message-retention cap, "online" activity window, distance units (km/mi).
 
-## Build & install (Basecamp Dev)
+## Install
+
+You need **Basecamp** and a **Meshtastic node connected over USB**. Install the two dependencies first,
+then the app (open the UI last — it auto-loads its dependencies):
+
+1. **`delivery_module`** (Logos Messaging) — install from Basecamp's **Package Manager**; it's a stock
+   Logos Core module.
+2. **`qr`** (QR generator service) — download **`logos-qr-module-lib.lgx`** from
+   [qr-basecamp releases](https://github.com/xAlisher/qr-basecamp/releases/latest) and install it.
+   (Only the core service is needed — you can skip `qr_ui`.)
+3. **Meshtastic Gateway** — download both files from the
+   [latest release](https://github.com/vpavlin/basecamp-meshtastic/releases/latest) and install them:
+   - [`logos-meshtastic_gateway-module-lib.lgx`](https://github.com/vpavlin/basecamp-meshtastic/releases/latest) — the core module
+   - [`logos-meshtastic_gateway_ui-module.lgx`](https://github.com/vpavlin/basecamp-meshtastic/releases/latest) — the UI
+
+Then open **Meshtastic Gateway** from Basecamp's app list — it pulls in `delivery_module` and `qr`
+automatically.
+
+> Installing a downloaded `.lgx`: use Basecamp's Package Manager (install from file), or the `lgpm` CLI:
+> `lgpm install --file <file>.lgx`.
+
+**Notes**
+
+- On Linux your user must be allowed to open the serial device (e.g. be in the `dialout` group for
+  `/dev/ttyACM*`). Set `MESHTASTIC_DEV=/dev/...` to force a specific device.
+- Only **one** application can hold the radio at a time. If another app — or a second Basecamp — has the
+  serial port open, the gateway sits at "connecting" and grabs the port automatically once it's freed.
+
+## Build from source
 
 ```bash
 cd gateway && nix build .#lgx-portable   # -> result/*.lgx (core module)
 cd ../ui   && nix build .#lgx-portable   # -> result/*.lgx (ui_qml plugin)
-# install each .lgx with lgpm into ~/.local/share/Logos/LogosBasecampDev/{modules,plugins}
 ```
 
-Runtime dependencies (`delivery_module`, `qr`) must be installed too — they auto-load when the UI opens,
-provided they're available in Basecamp. See the `basecamp-deploy` / `package-basecamp-module` skills for
-the iterate loop.
+CI builds both on every `v*` tag and attaches the `.lgx` files to a GitHub Release — see
+[`.github/workflows/release.yml`](.github/workflows/release.yml).
 
 ## Notes
 
