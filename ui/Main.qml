@@ -415,7 +415,8 @@ Item {
                             width: 8; height: 8; radius: 4
                             Layout.alignment: Qt.AlignVCenter
                             color: root.linkState === "connected" ? root.t.success
-                                 : root.linkState === "connecting" ? root.t.warn : root.t.textMuted
+                                 : root.linkState === "connecting" ? root.t.warn
+                                 : root.linkState === "noperm" ? root.t.danger : root.t.textMuted
                             // Blink while connecting (animate a helper prop, not a Canvas → cheap).
                             property real blink: 1.0
                             opacity: root.linkState === "connecting" ? blink : 1.0
@@ -431,7 +432,9 @@ Item {
                             elide: Text.ElideRight
                             color: root.t.textSec; font.pixelSize: root.t.fSmall
                             text: root.linkState === "connected" ? root.nodeName
-                                : root.linkState === "connecting" ? "Connecting…" : "No node connected"
+                                : root.linkState === "connecting" ? "Connecting…"
+                                : root.linkState === "noperm" ? "Serial port busy / no access"
+                                : "No node connected"
                         }
                     }
 
@@ -729,9 +732,13 @@ Item {
 
                     Text {
                         Layout.fillWidth: true; horizontalAlignment: Text.AlignHCenter
-                        text: root.nodePresent ? "Select a channel to start chatting"
+                        wrapMode: Text.Wrap
+                        text: root.linkState === "noperm"
+                                ? "Can't open the serial device.\nClose any other app using the node (or a second Basecamp), or grant your user serial access:\nsudo usermod -aG dialout $USER   — then log out and back in."
+                            : root.nodePresent ? "Select a channel to start chatting"
                                                : "Waiting for a Meshtastic node…"
-                        color: root.t.textSec; font.pixelSize: root.t.fBody
+                        color: root.linkState === "noperm" ? root.t.warn : root.t.textSec
+                        font.pixelSize: root.t.fBody
                     }
                     Text {
                         Layout.fillWidth: true; horizontalAlignment: Text.AlignHCenter

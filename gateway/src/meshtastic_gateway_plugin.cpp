@@ -394,8 +394,6 @@ void MeshtasticGatewayPlugin::scheduleNodesEmit()
     QTimer::singleShot(800, this, [this]() { m_nodesEmitPending = false; emitNodes(); });
 }
 
-// TODO: real NodeDB read — the Meshtastic node streams a NodeInfo list (num, user.longName/shortName,
-// lastHeard, snr, battery, position). "online" = lastHeard within an activity window (~2h default).
 // --- Relay / loop-prevention (see DATAFLOWS.md) -------------------------
 
 bool MeshtasticGatewayPlugin::isRelaying(int channelIndex) const
@@ -627,7 +625,8 @@ void MeshtasticGatewayPlugin::openSerial()
                 qWarning() << "meshtastic_gateway: serial error" << e << "— reconnecting";
                 if (m_serial->isOpen()) m_serial->close();
                 m_nodePresent = false;
-                m_linkState = "searching";
+                // PermissionError = device locked by another app, or our user lacks serial access.
+                m_linkState = (e == QSerialPort::PermissionError) ? "noperm" : "searching";
                 emitStatus();
                 QTimer::singleShot(3000, this, [this]() { openSerial(); });
             }
@@ -637,6 +636,9 @@ void MeshtasticGatewayPlugin::openSerial()
     m_serial->setBaudRate(QSerialPort::Baud115200);
     if (!m_serial->open(QIODevice::ReadWrite)) {
         qWarning() << "meshtastic_gateway: cannot open" << port << "—" << m_serial->errorString();
+        m_nodePresent = false;
+        m_linkState = (m_serial->error() == QSerialPort::PermissionError) ? "noperm" : "searching";
+        emitStatus();
         QTimer::singleShot(3000, this, [this]() { openSerial(); });
         return;
     }
