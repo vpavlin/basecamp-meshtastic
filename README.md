@@ -57,6 +57,18 @@ automatically.
 - Only **one** application can hold the radio at a time. If another app — or a second Basecamp — has the
   serial port open, the gateway sits at "connecting" and grabs the port automatically once it's freed.
 
+## Try it — public test channel
+
+To see the bridge work without setting up your own channel, join the public **`LM Relayed1`** test
+channel (already relayed to Logos Messaging):
+
+**<https://meshtastic.org/e/#Ch8SEC1G1oGFGJgmvH4qBCfYzSgaC0xNIFJlbGF5ZWQx>**
+
+Open that link on a Meshtastic device (or paste it into the Meshtastic app / scan it as a QR) to add the
+channel, then pick it in the gateway. Messages on it bridge to Logos Messaging, so two people far apart —
+each with their own node — can chat through it. It's a **shared, public** channel for testing; don't send
+anything you wouldn't post publicly.
+
 ## Build from source
 
 ```bash
