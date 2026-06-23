@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# gwctl — configure the headless Meshtastic gateway WITHOUT the GUI.
+#
+# Each command is a one-shot `logoscore` run that loads the module, waits for the radio
+# config burst, calls a Q_INVOKABLE method, and exits. Changes (relay toggles, settings,
+# node name, joined channels) persist in the gateway's SQLite, so the daemon picks them up.
+#
+# IMPORTANT: the daemon and gwctl can't run at once (they share the serial port + DB).
+# Stop the service first:   systemctl --user stop meshtastic-gateway
+# …then re-start it after:  systemctl --user start meshtastic-gateway
+#
+# Usage:
+#   gwctl channels                 list channels (index, name, relaying)
+#   gwctl status                   node + delivery status
+#   gwctl relay <index> on|off     toggle bridging for a channel (never index 0)
+#   gwctl join <share-url>         join an existing channel from a meshtastic.org/e/# link
+#   gwctl name "<long name>" <SHRT>  set the node's display name (written to the radio)
+#   gwctl set <key> <value>        a setting: onlineWindowSec | maxMsgsPerChannel | distanceUnit
+set -euo pipefail
+
+LOGOSCORE="${LOGOSCORE:-$HOME/.local/bin/logoscore}"
+MODULES_DIR="${MODULES_DIR:-$HOME/.local/share/Logos/LogosBasecampDev/modules}"
+MODULES="${MODULES:-capability_module,delivery_module,meshtastic_gateway}"
+M=meshtastic_gateway
+
+die() { echo "gwctl: $*" >&2; exit 1; }
+[[ -x "$LOGOSCORE" ]] || die "logoscore not found at '$LOGOSCORE' (set LOGOSCORE=...)"
+
+# refuse to fight a running daemon for the port/DB (check BEFORE arming the cleanup trap, so we
+# never kill a real daemon)
+if pgrep -x .logos_host-wra >/dev/null 2>&1; then
+  die "a logos host is already running — stop the daemon first: systemctl --user stop meshtastic-gateway"
+fi
+# logoscore --quit-on-finish leaks its child host; reap our own on exit so the next call is clean
+trap 'pkill -x .logos_host-wra 2>/dev/null || true' EXIT
+
+# Run logoscore with keep-alive padding so the radio config burst (channels + nodes) lands
+# before the action calls. $@ are extra '-c' calls. Returns the raw stdout.
+run() {
+  local pad=() i
+  for ((i=0; i<14; i++)); do pad+=(-c "$M.status()"); done
+  "$LOGOSCORE" -m "$MODULES_DIR" -l "$MODULES" "${pad[@]}" "$@" \
+      -c "$M.status()" -c "$M.status()" --quit-on-finish 2>&1
+}
+
+# pretty-print the channels JSON from a getChannels result line
+print_channels() {
+  grep -F 'Result: [{"channelIndex"' | tail -1 | sed -E 's/^.*Result: //' | python3 -c '
+import sys, json
+try:
+    rows = json.loads(sys.stdin.read())
+except Exception:
+    print("(no channels -- is the radio connected?)"); sys.exit(0)
+print("%3s  %-5s  %-7s  %s" % ("idx", "relay", "psk", "name"))
+for c in rows:
+    print("%3d  %-5s  %-7s  %s" % (c["channelIndex"], "ON" if c["relaying"] else "-", c["pskStatus"], c["displayName"]))
+'
+}
+
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  channels) run -c "$M.getChannels()" | print_channels ;;
+  status)   run -c "$M.status()" | grep -F 'Result: {' | tail -1 | sed -E 's/^.*Result: //' | python3 -m json.tool ;;
+  relay)
+    idx="${1:?usage: gwctl relay <index> on|off}"; state="${2:?usage: gwctl relay <index> on|off}"
+    [[ "$idx" == "0" && "$state" == "on" ]] && die "channel 0 (public/default) is never relayed"
+    case "$state" in on) en=true;; off) en=false;; *) die "state must be on|off";; esac
+    run -c "$M.setRelay($idx,$en)" -c "$M.getChannels()" | print_channels ;;
+  join)
+    url="${1:?usage: gwctl join <share-url>}"
+    [[ "$url" == *"#"* ]] || die "not a meshtastic.org/e/# share link"
+    run -c "$M.addChannelFromUrl($url)" -c "$M.getChannels()" | print_channels ;;
+  name)
+    long="${1:?usage: gwctl name \"<long>\" <SHORT>}"; short="${2:?usage: gwctl name \"<long>\" <SHORT>}"
+    run -c "$M.setOwner($long,$short)" >/dev/null && echo "node name set: $long ($short)" ;;
+  set)
+    key="${1:?usage: gwctl set <key> <value>}"; val="${2:?usage: gwctl set <key> <value>}"
+    run -c "$M.setSetting($key,$val)" >/dev/null && echo "set $key = $val" ;;
+  *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac

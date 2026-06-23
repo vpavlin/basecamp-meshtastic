@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Headless Meshtastic ⇄ Logos Messaging relay — the long-running daemon.
+#
+# Runs the gateway core module under `logoscore` (the GUI-less Logos host) with no
+# `--quit-on-finish`, so it stays resident and relays autonomously. Which channels are
+# bridged is read from the gateway's own SQLite (set once with ./gwctl, persisted).
+#
+# Meant to be launched by systemd (see meshtastic-gateway.service) with Restart=always.
+# Override paths via the environment (or /etc/default/meshtastic-gateway, EnvironmentFile=).
+set -euo pipefail
+
+LOGOSCORE="${LOGOSCORE:-$HOME/.local/bin/logoscore}"
+MODULES_DIR="${MODULES_DIR:-$HOME/.local/share/Logos/LogosBasecampDev/modules}"
+# capability_module → token handshake, delivery_module → Waku, meshtastic_gateway → the bridge.
+# qr is UI-only and not needed headless. Order matters: deps before the target.
+MODULES="${MODULES:-capability_module,delivery_module,meshtastic_gateway}"
+
+if [[ ! -x "$LOGOSCORE" ]]; then
+  echo "meshtastic-gateway-run: logoscore not found/executable at '$LOGOSCORE'" >&2
+  echo "  set LOGOSCORE=/path/to/logoscore (see server/README.md)" >&2
+  exit 1
+fi
+
+# A prior crash/restart can leak child hosts that still hold the Waku ports / serial / DB lock.
+# The host process is named '.logos_host-wra' (NOT 'logos_host'). Safe on a headless box (no GUI).
+pkill -x .logos_host-wra 2>/dev/null || true
+sleep 1
+
+echo "meshtastic-gateway-run: starting logoscore ($MODULES)"
+exec "$LOGOSCORE" -m "$MODULES_DIR" -l "$MODULES"

@@ -262,6 +262,12 @@ QString MeshtasticGatewayPlugin::getChannels()
 
 void MeshtasticGatewayPlugin::setRelay(int index, bool enabled)
 {
+    // Hard rule: channel 0 (the public/default channel) is NEVER relayed — privacy + airtime.
+    // The UI hides its toggle, but headless config (logoscore -c) could call this, so guard here too.
+    if (index == 0 && enabled) {
+        qWarning() << "meshtastic_gateway: refusing relay ON for channel 0 (public/default channel)";
+        return;
+    }
     for (int i = 0; i < m_channels.size(); ++i) {
         QJsonObject c = m_channels[i].toObject();
         if (c["channelIndex"].toInt() == index) {

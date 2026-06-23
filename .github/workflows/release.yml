@@ -1,8 +1,9 @@
 name: Release LGX
 
-# Build the portable .lgx packages for both modules and publish them.
-# - push a tag `v*`  -> builds + attaches the .lgx files to a GitHub Release
-# - manual dispatch  -> builds + uploads the .lgx files as workflow artifacts
+# Build the portable .lgx packages for both modules, for amd64 AND arm64 (Raspberry Pi),
+# and publish them.
+# - push a tag `v*`  -> builds both arches + attaches the .lgx files to a GitHub Release
+# - manual dispatch  -> builds both arches + uploads the .lgx files as workflow artifacts
 on:
   push:
     tags: ["v*"]
@@ -12,8 +13,16 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  build:
+    strategy:
+      fail-fast: false   # if arm64 fails, still ship amd64
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+          - runner: ubuntu-24.04-arm   # GitHub-hosted arm64 (free for public repos)
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
 
@@ -23,7 +32,7 @@ jobs:
             experimental-features = nix-command flakes
             access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
 
-      # Portable bundles use canonical variant names (linux-amd64, not -dev) so the
+      # Portable bundles use canonical variant names (linux-amd64/linux-arm64, not -dev) so the
       # Basecamp package manager accepts them — NEVER build .#lgx for a release.
       - name: Build gateway (core) .lgx
         run: nix build ./gateway#lgx-portable -o gateway-lgx --print-out-paths
@@ -31,22 +40,39 @@ jobs:
       - name: Build ui (ui_qml) .lgx
         run: nix build ./ui#lgx-portable -o ui-lgx --print-out-paths
 
-      - name: Collect artifacts
+      - name: Collect artifacts (arch-suffixed so both arches can coexist on one Release)
         run: |
           mkdir -p dist
-          cp -L gateway-lgx/*.lgx dist/
-          cp -L ui-lgx/*.lgx dist/
+          for f in gateway-lgx/*.lgx ui-lgx/*.lgx; do
+            cp -L "$f" "dist/$(basename "$f" .lgx)-linux-${{ matrix.arch }}.lgx"
+          done
           ls -la dist
 
       - name: Upload as workflow artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: lgx
+          name: lgx-${{ matrix.arch }}
           path: dist/*.lgx
           if-no-files-found: error
 
+  release:
+    needs: build
+    # run even if one arch failed (fail-fast:false), so the arch that built still ships
+    if: always() && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all built artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dl
+
+      - name: Flatten
+        run: |
+          mkdir -p dist
+          find dl -name '*.lgx' -exec cp -L {} dist/ \;
+          ls -la dist
+
       - name: Attach to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*.lgx

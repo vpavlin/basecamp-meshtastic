@@ -53,10 +53,11 @@ then the app (open the UI last — it auto-loads its dependencies):
 2. **`qr`** (QR generator service) — download **`logos-qr-module-lib.lgx`** from
    [qr-basecamp releases](https://github.com/xAlisher/qr-basecamp/releases/latest) and install it.
    (Only the core service is needed — you can skip `qr_ui`.)
-3. **Meshtastic Gateway** — download both files from the
-   [latest release](https://github.com/vpavlin/basecamp-meshtastic/releases/latest) and install them:
-   - [`logos-meshtastic_gateway-module-lib.lgx`](https://github.com/vpavlin/basecamp-meshtastic/releases/latest) — the core module
-   - [`logos-meshtastic_gateway_ui-module.lgx`](https://github.com/vpavlin/basecamp-meshtastic/releases/latest) — the UI
+3. **Meshtastic Gateway** — from the
+   [latest release](https://github.com/vpavlin/basecamp-meshtastic/releases/latest), download the **core**
+   (`…meshtastic_gateway-module-lib…`) and **UI** (`…meshtastic_gateway_ui-module…`) `.lgx`, picking the
+   asset for your architecture (**`-linux-amd64`** for a PC, **`-linux-arm64`** for a Raspberry Pi), then
+   install both.
 
 Then open **Meshtastic Gateway** from Basecamp's app list — it pulls in `delivery_module` and `qr`
 automatically.
@@ -82,6 +83,14 @@ Open that link on a Meshtastic device (or paste it into the Meshtastic app / sca
 channel, then pick it in the gateway. Messages on it bridge to Logos Messaging, so two people far apart —
 each with their own node — can chat through it. It's a **shared, public** channel for testing; don't send
 anything you wouldn't post publicly.
+
+## Headless / server relay (no GUI)
+
+The relay logic lives in the **core** module, so it can run as an always-on service on a server or
+Raspberry Pi with **no UI and no laptop** — via `logoscore`, the GUI-less Logos host. Set which channels
+to bridge once (persisted), and a systemd service keeps it relaying. See **[`server/`](server/)** for the
+systemd unit, an installer, and `gwctl` (configure relay channels / settings without the UI), plus the
+Raspberry Pi (aarch64) notes.
 
 ## Build from source
 

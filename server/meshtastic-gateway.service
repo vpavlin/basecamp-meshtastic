@@ -1,0 +1,19 @@
+[Unit]
+Description=Meshtastic <-> Logos Messaging gateway (headless relay)
+Documentation=https://github.com/vpavlin/basecamp-meshtastic
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Paths are resolved by the wrapper; override defaults in this file if your layout differs.
+EnvironmentFile=-%h/.config/meshtastic-gateway.env
+ExecStart=%h/.local/bin/meshtastic-gateway-run
+# logoscore on some (older/ARM) builds self-exits after ~90 s; always bring it back.
+Restart=always
+RestartSec=5
+# give the radio + Waku node time to come down cleanly on stop
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target
