@@ -1,11 +1,9 @@
 name: Pi aarch64 runtime stack
 
-# Helper: build the PORTABLE aarch64 Logos runtime needed to run the gateway headlessly on a
-# Raspberry Pi (no nix on the Pi). Builds natively on a GitHub arm64 runner and uploads:
-#   - logoscore-aarch64.AppImage   (the GUI-less host, from logos-liblogos #cli-appimage)
-#   - delivery_module .lgx          (from logos-delivery-module #lgx-portable)
-# capability_module (aarch64) ships in the logos-basecamp AppImage; our gateway .lgx comes from
-# the Release workflow. Manual only.
+# Helper: build the PORTABLE aarch64 logoscore (GUI-less Logos host) needed to run the gateway
+# headlessly on a Raspberry Pi (no nix on the Pi). Builds natively on a GitHub arm64 runner.
+# delivery_module (#lgx-portable) + capability_module are obtained separately; our gateway .lgx
+# comes from the Release workflow. Manual only.
 on:
   workflow_dispatch:
 
@@ -19,24 +17,20 @@ jobs:
             experimental-features = nix-command flakes
             access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build logoscore (portable bundle)
+      # cli-bundle-dir = a self-contained dir (logoscore + logos_host + bundled Qt, $ORIGIN rpath).
+      # Pinned to the ipc-fixes rev that adds the informModuleToken retry (token handshake fix).
+      - name: Build logoscore (portable cli-bundle-dir)
         run: |
-          nix build github:logos-co/logos-liblogos#portable -o logoscore-out --print-out-paths
+          nix build "github:logos-co/logos-liblogos/8bd03a30c9935dc31b9246a6b4d7698f1f0ea0b3#cli-bundle-dir" \
+            -o logoscore-out --print-out-paths
+          echo "=== bundle tree ==="; ls -laR "$(readlink -f logoscore-out)" | head -50
           mkdir -p out
-          echo "=== portable bundle contents ==="; ls -laR "$(readlink -f logoscore-out)" | head -40
-          # flatten symlinks into a self-contained tree, then tar
           cp -rL logoscore-out logoscore-bundle
-          tar -C logoscore-bundle -czf out/logoscore-aarch64-portable.tar.gz .
-          ls -la out
-
-      - name: Build delivery_module (.lgx portable)
-        run: |
-          nix build github:logos-co/logos-delivery-module#lgx-portable -o delivery-out --print-out-paths
-          cp -L delivery-out/*.lgx out/ 2>/dev/null || cp -rL delivery-out out/delivery-lgx
+          tar -C logoscore-bundle -czf out/logoscore-aarch64-bundle.tar.gz .
           ls -la out
 
       - uses: actions/upload-artifact@v4
         with:
-          name: pi-stack-aarch64
+          name: logoscore-aarch64
           path: out/*
           if-no-files-found: error
