@@ -1,0 +1,39 @@
+name: Pi aarch64 runtime stack
+
+# Helper: build the PORTABLE aarch64 Logos runtime needed to run the gateway headlessly on a
+# Raspberry Pi (no nix on the Pi). Builds natively on a GitHub arm64 runner and uploads:
+#   - logoscore-aarch64.AppImage   (the GUI-less host, from logos-liblogos #cli-appimage)
+#   - delivery_module .lgx          (from logos-delivery-module #lgx-portable)
+# capability_module (aarch64) ships in the logos-basecamp AppImage; our gateway .lgx comes from
+# the Release workflow. Manual only.
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build logoscore (portable AppImage)
+        run: |
+          nix build github:logos-co/logos-liblogos#cli-appimage -o logoscore-out --print-out-paths
+          mkdir -p out
+          cp -L logoscore-out/*.AppImage out/ 2>/dev/null || cp -rL logoscore-out out/logoscore-bundle
+          ls -la out
+
+      - name: Build delivery_module (.lgx portable)
+        run: |
+          nix build github:logos-co/logos-delivery-module#lgx-portable -o delivery-out --print-out-paths
+          cp -L delivery-out/*.lgx out/ 2>/dev/null || cp -rL delivery-out out/delivery-lgx
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pi-stack-aarch64
+          path: out/*
+          if-no-files-found: error
