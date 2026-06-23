@@ -93,6 +93,18 @@ cd ../ui   && nix build .#lgx-portable   # -> result/*.lgx (ui_qml plugin)
 CI builds both on every `v*` tag and attaches the `.lgx` files to a GitHub Release — see
 [`.github/workflows/release.yml`](.github/workflows/release.yml).
 
+## Security
+
+- **LoRa:** Meshtastic encrypts on-air with the channel PSK; the radio decrypts before handing messages
+  to the gateway over USB (no crypto in the gateway on the mesh side).
+- **Logos Messaging relay:** the relayed payload is **AES-256-GCM encrypted** with a key derived from
+  the channel PSK — `SHA-256("meshtastic-gateway/lm-relay/v1\n" + psk)`. The derivation is deterministic,
+  so every member (who already shares the channel name + PSK) computes the same key and can decrypt, while
+  a network observer on the Waku content topic sees only ciphertext. So a **private channel stays private
+  end to end**. Channels with no PSK are relayed in plaintext (they're unencrypted on LoRa too).
+- The content topic itself is derived from the channel name + PSK (`md5(name+psk)`), so non-members can't
+  even find a channel's messages.
+
 ## Notes
 
 - **Privacy:** relay is opt-in per channel and **channel 0 (the public/default channel) is never

@@ -125,8 +125,10 @@ We do **not** bundle a Waku node — the gateway reuses the one `delivery_module
 ```
 initDelivery()          createNode({mode:Edge, preset:logos.dev}) → start → subscribeRelayTopics()
 subscribeRelayTopics()  delivery_module.subscribe(T(N)) for each relaying channel
-publishToLM(T, text)    delivery_module.send(T, text)   (the module base64-encodes the payload)
-onDeliveryMessage()     messageReceived event [hash, topic, payloadB64, ts] → decode → dedup → display
+publishToLM(ch, text)   AES-256-GCM encrypt (key = SHA256(domain+psk)) → "ENC1:"+b64(iv|ct|tag) →
+                        delivery_module.send(T, payload)   (no-PSK channels are sent plaintext)
+onDeliveryMessage()     messageReceived [hash, topic, payloadB64, ts] → decode → decrypt ENC1 (drop on
+                        auth failure) → dedup (on plaintext) → display
                         + sendToMesh()   (inject onto LoRa)
 ```
 
