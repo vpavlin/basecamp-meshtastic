@@ -19,11 +19,14 @@ jobs:
             experimental-features = nix-command flakes
             access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build logoscore (portable AppImage)
+      - name: Build logoscore (portable bundle)
         run: |
-          nix build github:logos-co/logos-liblogos#cli-appimage -o logoscore-out --print-out-paths
+          nix build github:logos-co/logos-liblogos#portable -o logoscore-out --print-out-paths
           mkdir -p out
-          cp -L logoscore-out/*.AppImage out/ 2>/dev/null || cp -rL logoscore-out out/logoscore-bundle
+          echo "=== portable bundle contents ==="; ls -laR "$(readlink -f logoscore-out)" | head -40
+          # flatten symlinks into a self-contained tree, then tar
+          cp -rL logoscore-out logoscore-bundle
+          tar -C logoscore-bundle -czf out/logoscore-aarch64-portable.tar.gz .
           ls -la out
 
       - name: Build delivery_module (.lgx portable)
