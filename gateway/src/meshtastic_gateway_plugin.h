@@ -61,6 +61,7 @@ public:
     Q_INVOKABLE void setSetting(const QString& key, const QString& value);  // persist + apply + re-emit
     Q_INVOKABLE void setOwner(const QString& longName, const QString& shortName);  // write node name to radio
     Q_INVOKABLE void createChannel(const QString& name, const QString& pskB64);     // add a secondary channel
+    Q_INVOKABLE void addChannelFromUrl(const QString& url);                          // join via meshtastic.org/e/# link
     Q_INVOKABLE void deleteChannel(int index);                                      // disable a channel (not 0)
 
 signals:

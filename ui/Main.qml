@@ -211,6 +211,9 @@ Item {
     function doCreateChannel(name) {
         if (name && name.trim()) { gw("createChannel", [name.trim(), ""]); root.createChanOpen = false }
     }
+    function doImportChannel(url) {
+        if (url && url.indexOf("#") >= 0) { gw("addChannelFromUrl", [url.trim()]); root.createChanOpen = false }
+    }
     function doDeleteChannel() {
         if (root.openChannel > 0) { gw("deleteChannel", [root.openChannel]); root.openChannel = -1 }
         root.confirmDelOpen = false
@@ -534,7 +537,7 @@ Item {
                             MouseArea {
                                 id: addChanHover; anchors.fill: parent; hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: { newChanField.text = ""; root.createChanOpen = true }
+                                onClicked: { newChanField.text = ""; importChanField.text = ""; root.createChanOpen = true }
                             }
                         }
                     }
@@ -1575,43 +1578,80 @@ Item {
             ColumnLayout {
                 id: createCol
                 anchors.fill: parent; anchors.margins: root.t.lg; spacing: root.t.md
-                Text { text: "New channel"; color: root.t.text
+                Text { text: "Add channel"; color: root.t.text
                        font.pixelSize: root.t.fTitle; font.weight: Font.DemiBold }
-                Text {
-                    Layout.fillWidth: true; wrapMode: Text.Wrap
-                    text: "Creates a private secondary channel with a fresh random key, written to the radio. Share it afterwards to let others join."
-                    color: root.t.textSec; font.pixelSize: root.t.fSmall
-                }
-                Rectangle {
-                    Layout.fillWidth: true; height: 38; radius: root.t.radius; color: root.t.bg
-                    border.width: 1; border.color: newChanField.activeFocus ? root.t.primary : root.t.border
-                    TextField {
-                        id: newChanField; anchors.fill: parent
-                        anchors.leftMargin: root.t.sm; anchors.rightMargin: root.t.sm
-                        verticalAlignment: TextInput.AlignVCenter; color: root.t.text; font.pixelSize: root.t.fBody
-                        placeholderText: "Channel name"; placeholderTextColor: root.t.textMuted
-                        background: Item {}
-                        maximumLength: 11
-                        onAccepted: root.doCreateChannel(newChanField.text)
-                    }
-                }
+
+                // ── create a new channel (fresh random key) ──
+                Text { Layout.fillWidth: true; wrapMode: Text.Wrap
+                       text: "Create a new private channel (a fresh random key is generated):"
+                       color: root.t.textSec; font.pixelSize: root.t.fSmall }
                 RowLayout {
                     Layout.fillWidth: true; spacing: root.t.sm
+                    Rectangle {
+                        Layout.fillWidth: true; height: 38; radius: root.t.radius; color: root.t.bg
+                        border.width: 1; border.color: newChanField.activeFocus ? root.t.primary : root.t.border
+                        TextField {
+                            id: newChanField; anchors.fill: parent
+                            anchors.leftMargin: root.t.sm; anchors.rightMargin: root.t.sm
+                            verticalAlignment: TextInput.AlignVCenter; color: root.t.text; font.pixelSize: root.t.fBody
+                            placeholderText: "Channel name"; placeholderTextColor: root.t.textMuted
+                            background: Item {}
+                            maximumLength: 11
+                            onAccepted: root.doCreateChannel(newChanField.text)
+                        }
+                    }
+                    Rectangle {
+                        property bool ok: newChanField.text && newChanField.text.trim().length > 0
+                        width: 84; height: 38; radius: root.t.radius; color: ok ? root.t.primary : root.t.border
+                        Text { anchors.centerIn: parent; text: "Create"; color: parent.ok ? root.t.onPrimary : root.t.textMuted
+                               font.pixelSize: root.t.fSmall; font.weight: Font.DemiBold }
+                        MouseArea { anchors.fill: parent; enabled: parent.ok; cursorShape: Qt.PointingHandCursor
+                            onClicked: root.doCreateChannel(newChanField.text) }
+                    }
+                }
+
+                // ── or join an existing one from a share link ──
+                RowLayout {
+                    Layout.fillWidth: true; spacing: root.t.sm
+                    Rectangle { Layout.fillWidth: true; Layout.alignment: Qt.AlignVCenter; height: 1; color: root.t.border }
+                    Text { text: "or"; color: root.t.textMuted; font.pixelSize: root.t.fSmall }
+                    Rectangle { Layout.fillWidth: true; Layout.alignment: Qt.AlignVCenter; height: 1; color: root.t.border }
+                }
+                Text { Layout.fillWidth: true; wrapMode: Text.Wrap
+                       text: "Join an existing channel — paste a meshtastic.org/e/# share link:"
+                       color: root.t.textSec; font.pixelSize: root.t.fSmall }
+                RowLayout {
+                    Layout.fillWidth: true; spacing: root.t.sm
+                    Rectangle {
+                        Layout.fillWidth: true; height: 38; radius: root.t.radius; color: root.t.bg
+                        border.width: 1; border.color: importChanField.activeFocus ? root.t.primary : root.t.border
+                        TextField {
+                            id: importChanField; anchors.fill: parent
+                            anchors.leftMargin: root.t.sm; anchors.rightMargin: root.t.sm
+                            verticalAlignment: TextInput.AlignVCenter; color: root.t.text; font.pixelSize: root.t.fSmall
+                            placeholderText: "https://meshtastic.org/e/#…"; placeholderTextColor: root.t.textMuted
+                            background: Item {}
+                            onAccepted: root.doImportChannel(importChanField.text)
+                        }
+                    }
+                    Rectangle {
+                        property bool ok: importChanField.text && importChanField.text.indexOf("#") >= 0
+                        width: 84; height: 38; radius: root.t.radius; color: ok ? root.t.primary : root.t.border
+                        Text { anchors.centerIn: parent; text: "Add"; color: parent.ok ? root.t.onPrimary : root.t.textMuted
+                               font.pixelSize: root.t.fSmall; font.weight: Font.DemiBold }
+                        MouseArea { anchors.fill: parent; enabled: parent.ok; cursorShape: Qt.PointingHandCursor
+                            onClicked: root.doImportChannel(importChanField.text) }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
                     Item { Layout.fillWidth: true }
                     Rectangle {
                         width: 80; height: 34; radius: root.t.radius; color: "transparent"
                         border.width: 1; border.color: root.t.border
-                        Text { anchors.centerIn: parent; text: "Cancel"; color: root.t.textSec; font.pixelSize: root.t.fSmall }
+                        Text { anchors.centerIn: parent; text: "Close"; color: root.t.textSec; font.pixelSize: root.t.fSmall }
                         MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.createChanOpen = false }
-                    }
-                    Rectangle {
-                        property bool ok: newChanField.text && newChanField.text.trim().length > 0
-                        width: 90; height: 34; radius: root.t.radius; color: ok ? root.t.primary : root.t.border
-                        Text { anchors.centerIn: parent; text: "Create"
-                               color: parent.ok ? root.t.onPrimary : root.t.textMuted
-                               font.pixelSize: root.t.fSmall; font.weight: Font.DemiBold }
-                        MouseArea { anchors.fill: parent; enabled: parent.ok; cursorShape: Qt.PointingHandCursor
-                            onClicked: root.doCreateChannel(newChanField.text) }
                     }
                 }
             }

@@ -1102,6 +1102,37 @@ void MeshtasticGatewayPlugin::createChannel(const QString& name, const QString& 
     emitChannels();
 }
 
+// Join an existing channel from a Meshtastic share link (https://meshtastic.org/e/#<base64url ChannelSet>):
+// decode the first ChannelSettings (name + psk) and add it like createChannel.
+void MeshtasticGatewayPlugin::addChannelFromUrl(const QString& url)
+{
+    QString frag = url.trimmed();
+    const int hash = frag.indexOf('#');
+    if (hash >= 0) frag = frag.mid(hash + 1);          // accept full URL or bare fragment
+    const int q = frag.indexOf('?');
+    if (q >= 0) frag = frag.left(q);
+
+    const QByteArray raw = QByteArray::fromBase64(frag.toLatin1(), QByteArray::Base64UrlEncoding);
+    meshtastic::ChannelSet set;
+    if (raw.isEmpty() || !set.ParseFromArray(raw.constData(), int(raw.size())) || set.settings_size() < 1) {
+        qWarning() << "meshtastic_gateway: addChannelFromUrl — not a valid channel link";
+        return;
+    }
+    const meshtastic::ChannelSettings& s = set.settings(0);
+    const QString name = QString::fromStdString(s.name());
+    const QByteArray psk(s.psk().data(), int(s.psk().size()));
+
+    // Skip if we already have this channel (same derived topic).
+    const QString topic = deriveTopic(name, psk, 0);
+    for (const auto& v : m_channels)
+        if (v.toObject()["topic"].toString() == topic) {
+            qInfo() << "meshtastic_gateway: channel already present —" << name;
+            return;
+        }
+    qInfo() << "meshtastic_gateway: addChannelFromUrl —" << name;
+    createChannel(name, QString::fromLatin1(psk.toBase64()));
+}
+
 // Remove a channel: AdminMessage{set_channel:Channel{role=DISABLED}}. Never the primary (index 0).
 void MeshtasticGatewayPlugin::deleteChannel(int index)
 {
