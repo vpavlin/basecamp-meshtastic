@@ -22,8 +22,9 @@ if [[ ! -x "$LOGOSCORE" ]]; then
 fi
 
 # A prior crash/restart can leak child hosts that still hold the Waku ports / serial / DB lock.
-# The host process is named '.logos_host-wra' (NOT 'logos_host'). Safe on a headless box (no GUI).
-pkill -x .logos_host-wra 2>/dev/null || true
+# Match broadly: the host process is '.logos_host-wra' on x86 dev builds but '.logos_host.elf' on
+# the aarch64 AppImage build — `-f logos_host` covers both. Safe on a headless box (no GUI).
+pkill -9 -f logos_host 2>/dev/null || true
 sleep 1
 
 echo "meshtastic-gateway-run: starting logoscore ($MODULES)"

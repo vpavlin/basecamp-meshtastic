@@ -62,23 +62,46 @@ journalctl --user -u meshtastic-gateway -f      # watch it relay
 Channels themselves come from the **radio** — configure those with the standard Meshtastic app/CLI (or
 `gwctl join`); `gwctl relay` only decides which of them this gateway bridges.
 
-## Raspberry Pi / aarch64
+## Raspberry Pi / aarch64 — validated recipe (2026-06-23, Pi 5 / Debian 13)
 
-Same approach, but the whole stack must exist for `aarch64`:
+This runs end-to-end on a Pi: gateway connected to the radio, Waku ready, `LM Relayed1` relaying.
+The aarch64 Logos runtime isn't cleanly packaged yet, so assembling it takes a few manual steps.
+Components (all aarch64):
 
-1. **Module binaries** — the release CI builds `linux-arm64` `.lgx` for the gateway + UI alongside
-   `linux-amd64` (see [`.github/workflows/release.yml`](../.github/workflows/release.yml)); grab the
-   arm64 assets. `delivery_module` / `capability_module` / `logoscore` come from the **Logos platform**
-   and must also be aarch64 builds — that part is outside this repo.
-2. **Known host bug (older ~early-2026 aarch64 `logoscore`):** modules that *declare dependencies*
-   (this one declares `delivery_module`) can crash `logos_host` **before** `initLogos` runs — load
-   order can't fix it. If your Pi build hits this: use a newer `logoscore`, or fall back to driving
-   `liblogosdelivery` directly from a small Python/ctypes relay (the route the stoa relay took).
-   On a current x86_64 host this does **not** happen (validated).
-3. **Self-exit:** some builds let the core exit (~90 s) even when resident — `Restart=always` in the
-   unit covers it.
+| Piece | Source |
+|---|---|
+| `logoscore` + `logos_host` + Qt 6.9.2 | extract `logoscore-aarch64.AppImage` from a [logos-liblogos release](https://github.com/logos-co/logos-liblogos/releases) (`./x.AppImage --appimage-extract`) |
+| `capability_module` (aarch64) | from the [logos-basecamp aarch64 AppImage](https://github.com/logos-co/logos-basecamp/releases) (`usr/modules/capability_module`) |
+| `delivery_module` (aarch64 `.lgx`) | `nix build github:logos-co/logos-delivery-module#lgx-portable` on an arm64 runner |
+| gateway core + UI (aarch64 `.lgx`) | our Release `…-linux-arm64.lgx` |
 
-On an **x86_64 server it works today**; on a Pi, verify against points 2–3 first.
+Assemble a modules dir — for each `.lgx`: `tar xzf x.lgx`, copy `variants/linux-arm64/*` + `manifest.json`
+into `modules/<name>/`, write `linux-arm64` into a `variant` file. Then the **gotchas that bit us**:
+
+1. **Variant naming.** A *dev* `logoscore` looks for `linux-arm64-dev` (not `linux-arm64`) in each
+   `manifest.json`'s `main`. Add the key: `main["linux-arm64-dev"] = main["linux-arm64"]`.
+2. **Missing `libQt6SerialPort`.** The GUI bundle ships Qt 6.9.2 with `Sql`/`RemoteObjects`/`Network`
+   but **not** `SerialPort`. Drop a matching Qt 6.9.x `libQt6SerialPort.so.6` into the bundle's
+   `usr/lib` (`nix build nixpkgs#qt6.qtserialport --system aarch64-linux`).
+3. **SQLite driver dep.** The bundled `libqsqlite.so` needs `libsqlite3.so`; symlink the system one:
+   `ln -s /usr/lib/aarch64-linux-gnu/libsqlite3.so.0 <bundle>/usr/lib/libsqlite3.so` — else the DB
+   (relay-pref persistence) silently fails.
+4. **Cleanup process name.** The aarch64 host is `.logos_host.elf` (x86 is `.logos_host-wra`) — the
+   wrapper/`gwctl` use `pkill -f logos_host` to match both. A leaked host holds the radio and the next
+   start gets `linkState:noperm`.
+5. Run with `QT_QPA_PLATFORM=offscreen` and `LC_ALL=C.UTF-8`.
+
+Then add the channel + enable relay headlessly and start the unit:
+```bash
+gwctl join 'https://meshtastic.org/e/#…'   # adds the channel to the radio
+gwctl relay 2 on                            # persists to SQLite
+systemctl --user enable --now meshtastic-gateway
+```
+
+**The dep-crash bug is NOT present** in current builds — `delivery_module` (a dependency-declaring
+module) and our gateway both load and `initLogos` runs (validated on the Pi). The `~90 s` self-exit
+didn't occur either, but `Restart=always` covers it; relay prefs persist in SQLite so a restart resumes
+relaying. On an **x86_64 server** none of steps 1–3 are needed — the dev Basecamp's Qt already matches.
 
 ## Files
 

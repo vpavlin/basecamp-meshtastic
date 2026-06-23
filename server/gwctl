@@ -27,12 +27,12 @@ die() { echo "gwctl: $*" >&2; exit 1; }
 [[ -x "$LOGOSCORE" ]] || die "logoscore not found at '$LOGOSCORE' (set LOGOSCORE=...)"
 
 # refuse to fight a running daemon for the port/DB (check BEFORE arming the cleanup trap, so we
-# never kill a real daemon)
-if pgrep -x .logos_host-wra >/dev/null 2>&1; then
+# never kill a real daemon). Match both host names: .logos_host-wra (x86) and .logos_host.elf (arm).
+if pgrep -f logos_host >/dev/null 2>&1; then
   die "a logos host is already running — stop the daemon first: systemctl --user stop meshtastic-gateway"
 fi
 # logoscore --quit-on-finish leaks its child host; reap our own on exit so the next call is clean
-trap 'pkill -x .logos_host-wra 2>/dev/null || true' EXIT
+trap 'pkill -9 -f logos_host 2>/dev/null || true' EXIT
 
 # Run logoscore with keep-alive padding so the radio config burst (channels + nodes) lands
 # before the action calls. $@ are extra '-c' calls. Returns the raw stdout.
