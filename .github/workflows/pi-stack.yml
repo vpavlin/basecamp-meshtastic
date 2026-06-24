@@ -23,12 +23,12 @@ jobs:
       # backward-compatible with the existing 3-arg modules (they already ran under the 4-arg March build).
       - name: Build patched logoscore (cli-bundle-dir, 8bd03a3 + onEvent nullptr)
         run: |
-          git clone --no-checkout https://github.com/logos-co/logos-liblogos ll
-          cd ll && git checkout 8bd03a30c9935dc31b9246a6b4d7698f1f0ea0b3
+          SHA=8bd03a30c9935dc31b9246a6b4d7698f1f0ea0b3
+          curl -fsSL "https://github.com/logos-co/logos-liblogos/archive/$SHA.tar.gz" | tar xz
+          cd "logos-liblogos-$SHA"
           sed -i 's/->onEvent(replica, eventNameStr,/->onEvent(replica, nullptr, eventNameStr,/' src/logos_core/proxy_api.cpp
           echo "=== patched call ==="; grep -n "onEvent(replica" src/logos_core/proxy_api.cpp
-          git config user.email ci@local && git config user.name ci
-          git commit -aqm "patch: onEvent 4-arg nullptr (fix 8bd03a3 build)"   # so the flake sees it clean
+          git init -q && git add -A && git -c user.email=ci -c user.name=ci commit -qm patch   # flake needs a git tree
           nix build .#cli-bundle-dir -o ../logoscore-out --print-out-paths
           cd ..
           echo "=== bundle tree ==="; ls -laR "$(readlink -f logoscore-out)" | head -40
