@@ -29,7 +29,11 @@ jobs:
           sed -i 's/->onEvent(replica, eventNameStr,/->onEvent(replica, nullptr, eventNameStr,/' src/logos_core/proxy_api.cpp
           echo "=== patched call ==="; grep -n "onEvent(replica" src/logos_core/proxy_api.cpp
           git init -q && git add -A && git -c user.email=ci -c user.name=ci commit -qm patch   # flake needs a git tree
-          nix build .#cli-bundle-dir -o ../logoscore-out --print-out-paths
+          # Build against 4b66dac SDK — the rev the Pi's capability_module uses — so the informModuleToken
+          # handshake protocol matches (the default 4b143922 SDK mismatches and the token fails 10x).
+          nix build .#cli-bundle-dir \
+            --override-input logos-cpp-sdk github:logos-co/logos-cpp-sdk/4b66dac015e4 \
+            -o ../logoscore-out --print-out-paths
           cd ..
           echo "=== bundle tree ==="; ls -laR "$(readlink -f logoscore-out)" | head -40
           mkdir -p out
