@@ -18,10 +18,13 @@ jobs:
             access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
 
       # cli-bundle-dir = a self-contained dir (logoscore + logos_host + bundled Qt, $ORIGIN rpath).
-      # Pinned to the ipc-fixes rev that adds the informModuleToken retry (token handshake fix).
-      - name: Build logoscore (portable cli-bundle-dir)
+      # Pinned to 8bd03a3 (has the informModuleToken retry — the event-routing fix). That commit pins a
+      # 4-arg-onEvent SDK its own (3-arg) code doesn't match → won't compile. Override the SDK back to the
+      # 3-arg rev (4b66dac) the Pi's existing modules use, so it compiles AND stays ABI-compatible.
+      - name: Build logoscore (portable cli-bundle-dir, 3-arg SDK override)
         run: |
           nix build "github:logos-co/logos-liblogos/8bd03a30c9935dc31b9246a6b4d7698f1f0ea0b3#cli-bundle-dir" \
+            --override-input logos-cpp-sdk github:logos-co/logos-cpp-sdk/4b66dac015e4 \
             -o logoscore-out --print-out-paths
           echo "=== bundle tree ==="; ls -laR "$(readlink -f logoscore-out)" | head -50
           mkdir -p out
