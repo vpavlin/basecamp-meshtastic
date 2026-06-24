@@ -27,7 +27,10 @@ jobs:
           curl -fsSL "https://github.com/logos-co/logos-liblogos/archive/$SHA.tar.gz" | tar xz
           cd "logos-liblogos-$SHA"
           sed -i 's/->onEvent(replica, eventNameStr,/->onEvent(replica, nullptr, eventNameStr,/' src/logos_core/proxy_api.cpp
-          echo "=== patched call ==="; grep -n "onEvent(replica" src/logos_core/proxy_api.cpp
+          # Run in LOCAL mode (in-process modules): cross-module events become direct Qt signals, fixing
+          # the broken Remote-mode (logos_host) event delivery that the GUI sidesteps the same way.
+          sed -i 's/    logos_core_init(argc, argv);/    logos_core_init(argc, argv);\n    logos_core_set_mode(1);/' app/main.cpp
+          echo "=== patched calls ==="; grep -n "onEvent(replica" src/logos_core/proxy_api.cpp; grep -n "set_mode" app/main.cpp
           git init -q && git add -A && git -c user.email=ci -c user.name=ci commit -qm patch   # flake needs a git tree
           # Build against 4b66dac SDK — the rev the Pi's capability_module uses — so the informModuleToken
           # handshake protocol matches (the default 4b143922 SDK mismatches and the token fails 10x).
