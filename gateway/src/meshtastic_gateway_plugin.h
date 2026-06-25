@@ -15,6 +15,7 @@ class LogosAPI;
 class LogosAPIClient;
 class LogosObject;
 class QSerialPort;
+class MeshCoreRadio;
 
 // Bridges a connected Meshtastic node's LoRa channels to/from Logos Messaging topics.
 //
@@ -128,6 +129,8 @@ private:
     bool m_deliveryReady = false;           // node created + started
     QString m_deliveryState = "down";       // down | connecting | ready (Logos Messaging indicator)
     int m_deliveryTries = 0;                // bounded connect retries
+    MeshCoreRadio* m_mcRadio = nullptr;     // MeshCore backend (when meshProtocol=meshcore)
+    bool m_useMeshCore = false;             // true: drive m_mcRadio instead of the inline Meshtastic serial
     QSerialPort* m_serial = nullptr;        // USB link to the Meshtastic node
     QByteArray m_rxBuf;                      // StreamAPI byte accumulator (0x94 0xc3 framing)
     QJsonArray m_cfgChannels;               // channels gathered during the want_config burst

@@ -13,6 +13,11 @@ logos_module(
         src/meshtastic_gateway_interface.h
         src/meshtastic_gateway_plugin.h
         src/meshtastic_gateway_plugin.cpp
+        src/mesh_radio.h
+        src/meshcore_protocol.h
+        src/meshcore_protocol.cpp
+        src/meshcore_radio.h
+        src/meshcore_radio.cpp
 )
 
 # --- Meshtastic serial transport: QtSerialPort + generated protobufs ---------

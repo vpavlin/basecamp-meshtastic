@@ -2,6 +2,7 @@
 #include "logos_api.h"
 #include "logos_api_client.h"
 #include "token_manager.h"
+#include "meshcore_radio.h"
 
 #include <cmath>
 #include <QCryptographicHash>
@@ -42,8 +43,32 @@ void MeshtasticGatewayPlugin::initLogos(LogosAPI* api)
             << "channels" << m_channels.size();
     // Defer delivery setup off the QRO reply thread (createNode/start are slow + async).
     QTimer::singleShot(0, this, [this]() { initDelivery(); });
-    // Connect to the Meshtastic radio over USB serial.
-    QTimer::singleShot(0, this, [this]() { openSerial(); });
+
+    // Mesh backend selection: Meshtastic (StreamAPI, inline below) is the default; MESH_PROTOCOL=meshcore
+    // drives the MeshCore companion protocol via MeshCoreRadio. The LM relay / encryption / dedup / DB /
+    // UI layer is protocol-agnostic, so a MeshCore backend plugs into the same rebuildChannelsFromMesh +
+    // onMeshMessage path. The channel object MeshCoreRadio emits is exactly what rebuildChannelsFromMesh
+    // expects ({channelIndex,name,psk,role}), and sendToMesh()/the admin ops branch on m_useMeshCore.
+    m_useMeshCore = (qgetenv("MESH_PROTOCOL").toLower() == "meshcore");
+    if (m_useMeshCore) {
+        qInfo() << "meshtastic_gateway: mesh backend = MeshCore (companion protocol)";
+        m_mcRadio = new MeshCoreRadio(this);
+        connect(m_mcRadio, &MeshRadio::channelsDiscovered, this, &MeshtasticGatewayPlugin::rebuildChannelsFromMesh);
+        connect(m_mcRadio, &MeshRadio::meshMessage, this, &MeshtasticGatewayPlugin::onMeshMessage);
+        connect(m_mcRadio, &MeshRadio::linkStateChanged, this,
+                [this](const QString& s, bool present, const QString& name) {
+            m_linkState = s; m_nodePresent = present; if (!name.isEmpty()) m_nodeName = name;
+            emitStatus();
+        });
+        connect(m_mcRadio, &MeshRadio::nodesDiscovered, this,
+                [this](const QJsonArray&, int total, int online) {
+            m_nodesTotal = total; m_nodesOnline = online; emitStatus();
+        });
+        QTimer::singleShot(0, this, [this]() { m_mcRadio->start(); });
+    } else {
+        // Connect to the Meshtastic radio over USB serial.
+        QTimer::singleShot(0, this, [this]() { openSerial(); });
+    }
 }
 
 // REAL derivation (final): only someone holding the channel name+psk can compute the topic, so it
@@ -1016,6 +1041,7 @@ void MeshtasticGatewayPlugin::onMeshMessage(int channelIndex, const QString& fro
 
 void MeshtasticGatewayPlugin::sendToMesh(int channelIndex, const QString& text)
 {
+    if (m_useMeshCore) { if (m_mcRadio) m_mcRadio->sendToMesh(channelIndex, text); return; }
     if (!m_serial || !m_serial->isOpen()) {
         qWarning() << "meshtastic_gateway: serial not open — mesh TX dropped on ch" << channelIndex;
         return;
@@ -1050,6 +1076,7 @@ static void sendAdminMsg(QSerialPort* serial, quint32 myNum, const meshtastic::A
 // Write the node's owner name to the radio: AdminMessage{set_owner:User}.
 void MeshtasticGatewayPlugin::setOwner(const QString& longName, const QString& shortName)
 {
+    if (m_useMeshCore) { if (m_mcRadio) m_mcRadio->setOwner(longName, shortName); return; }
     const QString ln = longName.trimmed();
     const QString sn = shortName.trimmed();
     if (ln.isEmpty()) return;
@@ -1078,6 +1105,10 @@ void MeshtasticGatewayPlugin::setOwner(const QString& longName, const QString& s
 // Add a SECONDARY channel: AdminMessage{set_channel:Channel} at the lowest free slot (1..7).
 void MeshtasticGatewayPlugin::createChannel(const QString& name, const QString& pskB64)
 {
+    if (m_useMeshCore) {
+        if (m_mcRadio) m_mcRadio->createChannel(name.trimmed(), QByteArray::fromBase64(pskB64.toUtf8()));
+        return;
+    }
     const QString nm = name.trimmed();
     if (nm.isEmpty()) return;
 
@@ -1124,6 +1155,7 @@ void MeshtasticGatewayPlugin::createChannel(const QString& name, const QString& 
 // decode the first ChannelSettings (name + psk) and add it like createChannel.
 void MeshtasticGatewayPlugin::addChannelFromUrl(const QString& url)
 {
+    if (m_useMeshCore) { if (m_mcRadio) m_mcRadio->addChannelFromUrl(url); return; }
     QString frag = url.trimmed();
     const int hash = frag.indexOf('#');
     if (hash >= 0) frag = frag.mid(hash + 1);          // accept full URL or bare fragment
@@ -1154,6 +1186,7 @@ void MeshtasticGatewayPlugin::addChannelFromUrl(const QString& url)
 // Remove a channel: AdminMessage{set_channel:Channel{role=DISABLED}}. Never the primary (index 0).
 void MeshtasticGatewayPlugin::deleteChannel(int index)
 {
+    if (m_useMeshCore) { if (m_mcRadio) m_mcRadio->deleteChannel(index); return; }
     if (index <= 0) { qWarning() << "meshtastic_gateway: refusing to delete channel" << index; return; }
 
     meshtastic::AdminMessage admin;
