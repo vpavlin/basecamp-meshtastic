@@ -17,36 +17,18 @@ jobs:
             experimental-features = nix-command flakes
             access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build gateway (core) .lgx @ aea29d37
-        run: |
-          nix build ./gateway#lgx-portable \
-            --override-input logos-module-builder/logos-cpp-sdk github:logos-co/logos-cpp-sdk/aea29d37975aa0c32fdf37d7119830be905acf34 \
-            -o gw-lgx --print-out-paths
+      # Default SDK (1468180b, 3-arg) — the exact build proven to work in the laptop GUI. The SDK is
+      # static-linked into each .so, so GUI compatibility is about IPC protocol, not symbol linking.
+      - name: Build gateway (core) .lgx
+        run: nix build ./gateway#lgx-portable -o gw-lgx --print-out-paths
 
-      - name: Build ui (ui_qml) .lgx @ aea29d37
-        run: |
-          nix build ./ui#lgx-portable \
-            --override-input logos-module-builder/logos-cpp-sdk github:logos-co/logos-cpp-sdk/aea29d37975aa0c32fdf37d7119830be905acf34 \
-            -o ui-lgx --print-out-paths
-
-      - name: Build delivery_module .lgx @ aea29d37
-        run: |
-          set -x
-          # try the common input-path forms; keep whichever succeeds
-          nix build github:logos-co/logos-delivery-module#lgx-portable \
-            --override-input logos-module-builder/logos-cpp-sdk github:logos-co/logos-cpp-sdk/aea29d37975aa0c32fdf37d7119830be905acf34 \
-            -o dl-lgx --print-out-paths \
-          || nix build github:logos-co/logos-delivery-module#lgx-portable \
-            --override-input logos-cpp-sdk github:logos-co/logos-cpp-sdk/aea29d37975aa0c32fdf37d7119830be905acf34 \
-            -o dl-lgx --print-out-paths \
-          || nix build github:logos-co/logos-delivery-module#lgx-portable \
-            -o dl-lgx --print-out-paths
-          echo "delivery built (override may or may not have applied — check ABI on install)"
+      - name: Build ui (ui_qml) .lgx
+        run: nix build ./ui#lgx-portable -o ui-lgx --print-out-paths
 
       - name: Collect
         run: |
           mkdir -p dist
-          for f in gw-lgx/*.lgx ui-lgx/*.lgx dl-lgx/*.lgx; do
+          for f in gw-lgx/*.lgx ui-lgx/*.lgx; do
             [ -e "$f" ] && cp -L "$f" "dist/$(basename "$f")"
           done
           ls -la dist
