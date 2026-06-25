@@ -1,0 +1,58 @@
+name: GUI modules (arm64 @ aea29d37)
+
+# Build gateway (core) + ui (ui_qml) + delivery_module for arm64 against the SDK rev the newest
+# aarch64 Basecamp GUI AppImage uses (logos-cpp-sdk aea29d37, 3-arg onEvent) so they ABI-match and
+# load inside the GUI (ui-host path). Used to test bidirectional relay under the GUI (xvfb) on the Pi.
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build gateway (core) .lgx @ aea29d37
+        run: |
+          nix build ./gateway#lgx-portable \
+            --override-input logos-module-builder/logos-cpp-sdk github:logos-co/logos-cpp-sdk/aea29d37975aa0c32fdf37d7119830be905acf34 \
+            -o gw-lgx --print-out-paths
+
+      - name: Build ui (ui_qml) .lgx @ aea29d37
+        run: |
+          nix build ./ui#lgx-portable \
+            --override-input logos-module-builder/logos-cpp-sdk github:logos-co/logos-cpp-sdk/aea29d37975aa0c32fdf37d7119830be905acf34 \
+            -o ui-lgx --print-out-paths
+
+      - name: Build delivery_module .lgx @ aea29d37
+        run: |
+          set -x
+          # try the common input-path forms; keep whichever succeeds
+          nix build github:logos-co/logos-delivery-module#lgx-portable \
+            --override-input logos-module-builder/logos-cpp-sdk github:logos-co/logos-cpp-sdk/aea29d37975aa0c32fdf37d7119830be905acf34 \
+            -o dl-lgx --print-out-paths \
+          || nix build github:logos-co/logos-delivery-module#lgx-portable \
+            --override-input logos-cpp-sdk github:logos-co/logos-cpp-sdk/aea29d37975aa0c32fdf37d7119830be905acf34 \
+            -o dl-lgx --print-out-paths \
+          || nix build github:logos-co/logos-delivery-module#lgx-portable \
+            -o dl-lgx --print-out-paths
+          echo "delivery built (override may or may not have applied — check ABI on install)"
+
+      - name: Collect
+        run: |
+          mkdir -p dist
+          for f in gw-lgx/*.lgx ui-lgx/*.lgx dl-lgx/*.lgx; do
+            [ -e "$f" ] && cp -L "$f" "dist/$(basename "$f")"
+          done
+          ls -la dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gui-modules-arm64
+          path: dist/*.lgx
+          if-no-files-found: error
