@@ -5,6 +5,27 @@ The relay logic lives entirely in the **core** module; the Basecamp UI is just a
 Headless, the core opens the radio, connects to Logos Messaging, and bridges the channels you've
 marked for relay — on its own.
 
+> ## ⚠️ Direction support: headless is currently **mesh → Logos Messaging only**
+>
+> Under bare `logoscore`, the relay is **one-way**: messages from the mesh are bridged **to** Logos
+> Messaging, but the reverse (**Logos Messaging → mesh**) does **not** work headlessly. This is
+> upstream **[logos-basecamp#150](https://github.com/logos-co/logos-basecamp/issues/150)**: the
+> capability-token bootstrap that authorizes cross-module *events* (`delivery_module` →
+> our gateway's `messageReceived`) is performed by the **Basecamp GUI host**, not by `logoscore`.
+>
+> What we verified (2026-06-25): an inbound Logos Messaging message **does reach the Pi's
+> `delivery_module`** (it logs `Received message push` and emits `messageReceived`), but the gateway's
+> `onDeliveryMessage` never fires under `logoscore` — `informModuleToken` returns false with
+> `QtProviderObject::informModuleToken: LogosAPI not available` (capability isn't bootstrapped). A
+> gateway-side `TokenManager` seed (see `initDelivery()`) does **not** fix it — the gap is capability-side.
+>
+> **Workarounds for full bidirectional:**
+> - Run the full **Basecamp GUI** under a virtual display (`xvfb`) — it performs the bootstrap, so
+>   events flow. Heavier, and on aarch64/xvfb it has rough edges (flaky Waku peering, suppressed module
+>   logs, the gateway can be slow to subscribe). This is how the reference deployment runs it.
+> - The durable fix is upstream #150 — once landed, this lightweight `logoscore` daemon does both
+>   directions with full visibility.
+
 ## How it runs
 
 There's no separate daemon binary — the GUI-less Logos host is **`logoscore`** (the CLI sibling of
