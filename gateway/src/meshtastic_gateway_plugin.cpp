@@ -1,6 +1,7 @@
 #include "meshtastic_gateway_plugin.h"
 #include "logos_api.h"
 #include "logos_api_client.h"
+#include "token_manager.h"
 
 #include <cmath>
 #include <QCryptographicHash>
@@ -468,6 +469,17 @@ void MeshtasticGatewayPlugin::setDeliveryState(const QString& s)
 void MeshtasticGatewayPlugin::initDelivery()
 {
     if (!m_logosAPI) return;
+
+    // Headless token bootstrap (logos-basecamp#150 workaround). Under bare logoscore the host never
+    // seeds the capability tokens, so delivery_module isn't authorized to PUSH events back to us and
+    // onDeliveryMessage never fires (inbound LM->mesh is blocked). The only real gate is an isEmpty()
+    // reject, so any non-empty token passes: seed delivery_module (for our outbound calls) AND our own
+    // name (so delivery is authorized to push messageReceived events to us). No-op under the GUI host,
+    // which seeds real tokens itself. See Sina's headless-delivery-events writeup.
+    TokenManager& tm = TokenManager::instance();
+    if (tm.getToken("delivery_module").isEmpty())   tm.saveToken("delivery_module", "meshtastic_bootstrap_v1");
+    if (tm.getToken("meshtastic_gateway").isEmpty()) tm.saveToken("meshtastic_gateway", "meshtastic_bootstrap_v1");
+
     if (!m_delivery)                  m_delivery = m_logosAPI->getClient("delivery_module");
     if (!m_deliveryObj && m_delivery) m_deliveryObj = m_delivery->requestObject("delivery_module");
 
