@@ -72,6 +72,30 @@ Bytes cmdSendChannelMessage(uint8_t index, uint32_t unixTime, const std::string&
     return f;
 }
 
+Bytes cmdGetContacts(uint32_t since) {
+    Bytes f{CMD_GET_CONTACTS};
+    if (since) putU32(f, since);        // optional: only contacts modified since this lastmod
+    return f;
+}
+
+Bytes cmdSendSelfAdvert(bool flood) {
+    return Bytes{CMD_SEND_SELF_ADVERT, uint8_t(flood ? 1 : 0)};
+}
+
+Bytes cmdSetAdvertName(const std::string& name) {
+    Bytes f{CMD_SET_ADVERT_NAME};
+    std::string s = name;
+    if (s.size() > 32) s.resize(32);                // adv_name field is 32 chars
+    f.insert(f.end(), s.begin(), s.end());          // raw UTF-8, remainder of frame
+    return f;
+}
+
+Bytes cmdSetDeviceTime(uint32_t epochSecs) {
+    Bytes f{CMD_SET_DEVICE_TIME};
+    putU32(f, epochSecs);
+    return f;
+}
+
 Bytes cmdSetChannel(uint8_t index, const std::string& name, const Bytes& secret16) {
     Bytes f;
     f.push_back(CMD_SET_CHANNEL);
@@ -106,6 +130,21 @@ std::optional<ChannelInfo> parseChannelInfo(const Bytes& f) {
     c.secret.assign(f.begin() + 34, f.begin() + 50);
     const bool zeroSecret = std::all_of(c.secret.begin(), c.secret.end(), [](uint8_t x) { return x == 0; });
     c.isEmpty = c.name.empty() && zeroSecret;
+    return c;
+}
+
+std::optional<Contact> parseContact(const Bytes& f) {
+    // RESP_CONTACT (0x03): code(1) pubkey(32) type(1) flags(1) out_path_len(1) out_path(64)
+    //                      adv_name(32) last_advert(4) adv_lat(4) adv_lon(4) lastmod(4) = 148 bytes
+    if (f.size() < 148 || f[0] != RESP_CONTACT) return std::nullopt;
+    Contact c;
+    c.publicKey.assign(f.begin() + 1, f.begin() + 33);
+    c.type       = f[33];
+    c.flags      = f[34];
+    c.name       = trimNul(f, 100, 32);
+    c.lastAdvert = getU32(f, 132);
+    c.lat        = getI32(f, 136) / 1e6;
+    c.lon        = getI32(f, 140) / 1e6;
     return c;
 }
 

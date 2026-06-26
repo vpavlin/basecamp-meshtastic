@@ -144,6 +144,30 @@ int main() {
               "parseSelfInfo pubkey+sf+cr+name");
     }
 
+    // ---- cmdGetContacts / cmdSendSelfAdvert ----
+    {
+        check(cmdGetContacts() == Bytes{0x04}, "cmdGetContacts (no since)");
+        check(cmdGetContacts(0x01020304) == (Bytes{0x04, 0x04,0x03,0x02,0x01}), "cmdGetContacts (since LE)");
+        check(cmdSendSelfAdvert(true)  == (Bytes{0x07, 0x01}), "cmdSendSelfAdvert flood");
+        check(cmdSendSelfAdvert(false) == (Bytes{0x07, 0x00}), "cmdSendSelfAdvert zero-hop");
+        check(cmdSetAdvertName("VP2-pi") == (Bytes{0x08,'V','P','2','-','p','i'}), "cmdSetAdvertName");
+        check(cmdSetDeviceTime(0x01020304) == (Bytes{0x06, 0x04,0x03,0x02,0x01}), "cmdSetDeviceTime (LE)");
+    }
+    // ---- parseContact (0x03, 148-byte entry) ----
+    {
+        Bytes f(148, 0);
+        f[0] = 0x03;
+        for (int i = 0; i < 32; ++i) f[1 + i] = uint8_t(0xA0 + i);          // pubkey
+        f[33] = 1;                                                           // type
+        std::string nm = "VP2node"; for (size_t i = 0; i < nm.size(); ++i) f[100 + i] = uint8_t(nm[i]);
+        f[132] = 0x10;                                                       // last_advert = 0x10 (LE)
+        uint32_t lat = 1500000; for (int i = 0; i < 4; ++i) f[136 + i] = uint8_t((lat >> (8 * i)) & 0xff);
+        auto c = parseContact(f);
+        check(c && c->publicKey.size() == 32 && c->publicKey[0] == 0xA0 && c->type == 1 &&
+              c->name == "VP2node" && c->lastAdvert == 0x10 && c->lat > 1.49 && c->lat < 1.51,
+              "parseContact pubkey+name+lastAdvert+lat");
+    }
+
     // ---- round-trip: wrap a built command, read it back through FrameReader as if echoed ----
     {
         Bytes inner = cmdGetChannelInfo(4);

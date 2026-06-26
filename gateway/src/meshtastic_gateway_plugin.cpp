@@ -61,8 +61,19 @@ void MeshtasticGatewayPlugin::initLogos(LogosAPI* api)
             emitStatus();
         });
         connect(m_mcRadio, &MeshRadio::nodesDiscovered, this,
-                [this](const QJsonArray&, int total, int online) {
-            m_nodesTotal = total; m_nodesOnline = online; emitStatus();
+                [this](const QJsonArray& nodes, int total, int online) {
+            // MeshCore backend supplies a ready node list (self + contacts); feed it through the
+            // shared m_nodes/emitNodes path so the Nodes view renders identically to Meshtastic.
+            m_nodes.clear();
+            for (const QJsonValue& v : nodes) {
+                const QJsonObject o = v.toObject();
+                const quint32 num = quint32(o.value("num").toDouble());
+                if (o.value("isSelf").toBool()) m_myNum = num;
+                m_nodes[num] = o;
+            }
+            m_nodesTotal = total; m_nodesOnline = online;
+            emitNodes();
+            emitStatus();
         });
         QTimer::singleShot(0, this, [this]() { m_mcRadio->start(); });
     } else {
@@ -1076,7 +1087,11 @@ static void sendAdminMsg(QSerialPort* serial, quint32 myNum, const meshtastic::A
 // Write the node's owner name to the radio: AdminMessage{set_owner:User}.
 void MeshtasticGatewayPlugin::setOwner(const QString& longName, const QString& shortName)
 {
-    if (m_useMeshCore) { if (m_mcRadio) m_mcRadio->setOwner(longName, shortName); return; }
+    if (m_useMeshCore) {
+        if (m_mcRadio) m_mcRadio->setOwner(longName, shortName);
+        emit eventResponse("ownerSaved", QVariantList() << longName.trimmed());
+        return;
+    }
     const QString ln = longName.trimmed();
     const QString sn = shortName.trimmed();
     if (ln.isEmpty()) return;
@@ -1100,6 +1115,7 @@ void MeshtasticGatewayPlugin::setOwner(const QString& longName, const QString& s
     }
     emitStatus();
     emitNodes();
+    emit eventResponse("ownerSaved", QVariantList() << ln);
 }
 
 // Add a SECONDARY channel: AdminMessage{set_channel:Channel} at the lowest free slot (1..7).

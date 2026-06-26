@@ -13,6 +13,12 @@ using meshcore::Bytes;
 
 static QByteArray toQB(const Bytes& b) { return QByteArray(reinterpret_cast<const char*>(b.data()), int(b.size())); }
 static QString b64(const Bytes& b) { return QString::fromLatin1(toQB(b).toBase64()); }
+// Derive a stable positive node number from the first 4 bytes of a public key (the Nodes view keys on it).
+static quint32 nodeNum(const QByteArray& pk) {
+    quint32 v = 0;
+    for (int i = 0; i < 4 && i < pk.size(); ++i) v = (v << 8) | quint8(pk[i]);
+    return v & 0x7FFFFFFFu;
+}
 
 MeshCoreRadio::MeshCoreRadio(QObject* parent) : MeshRadio(parent) {}
 MeshCoreRadio::~MeshCoreRadio() { if (m_serial && m_serial->isOpen()) m_serial->close(); }
@@ -114,6 +120,7 @@ void MeshCoreRadio::handleFrame(const Bytes& f)
         if (auto si = meshcore::parseSelfInfo(f)) {
             m_pubKey   = toQB(si->publicKey);
             m_nodeName = QString::fromStdString(si->name);
+            m_selfLat  = si->lat; m_selfLon = si->lon;
             qInfo() << "meshcore_radio: SELF_INFO name" << m_nodeName << "sf" << si->sf << "cr" << si->cr;
             m_handshaked = true;
             emit linkStateChanged(QStringLiteral("connecting"), true, m_nodeName);
@@ -143,6 +150,22 @@ void MeshCoreRadio::handleFrame(const Bytes& f)
         // Direct (contact) messages aren't channel traffic — log + drain, but don't relay.
         qInfo() << "meshcore_radio: contact (DM) message — not relayed";
         drainNext();
+        break;
+
+    case meshcore::RESP_CONTACTS_START:
+        m_contacts.clear();                // begin a fresh GET_CONTACTS reply
+        break;
+    case meshcore::RESP_CONTACT:
+        if (auto c = meshcore::parseContact(f)) m_contacts.push_back(*c);
+        break;
+    case meshcore::RESP_END_OF_CONTACTS:
+        buildAndEmitNodes();               // contact list complete -> refresh the Nodes view
+        break;
+
+    case meshcore::PUSH_ADVERT:
+    case meshcore::PUSH_NEW_ADVERT:
+        qInfo() << "meshcore_radio: advert received — refreshing contacts";
+        requestContacts();                 // a node announced itself -> re-pull contacts
         break;
 
     case meshcore::PUSH_MSGS_WAITING:
@@ -185,15 +208,59 @@ void MeshCoreRadio::finishDiscovery()
     emit channelsDiscovered(chans);
     emit linkStateChanged(QStringLiteral("connected"), true, m_nodeName);
 
-    // Minimal NodeDB: just self (MeshCore contacts could populate this later).
-    QJsonArray nodes;
-    QJsonObject self;
-    self["num"] = 0; self["isSelf"] = true; self["name"] = m_nodeName;
-    nodes.append(self);
-    emit nodesDiscovered(nodes, 1, 1);
+    // Set the radio clock from the host (companion radios have no RTC) so our adverts carry a fresh
+    // timestamp, then announce ourselves, show self now, and pull the contact list.
+    sendFrame(meshcore::cmdSetDeviceTime(quint32(QDateTime::currentSecsSinceEpoch())));
+    sendFrame(meshcore::cmdSendSelfAdvert(true));
+    buildAndEmitNodes();        // self immediately; contacts fill in via END_OF_CONTACTS / adverts
+    requestContacts();
 
     m_discovered = true;
     drainNext();    // drain anything queued while we were connecting
+}
+
+void MeshCoreRadio::requestContacts()
+{
+    if (m_handshaked) sendFrame(meshcore::cmdGetContacts());
+}
+
+void MeshCoreRadio::buildAndEmitNodes()
+{
+    const qint64 now = QDateTime::currentSecsSinceEpoch();
+    QJsonArray nodes;
+
+    QJsonObject self;
+    self["num"]       = double(nodeNum(m_pubKey));
+    self["isSelf"]    = true;
+    self["name"]      = m_nodeName;
+    self["longName"]  = m_nodeName;
+    self["lastHeard"] = double(now);
+    self["hasPos"]    = (m_selfLat != 0 || m_selfLon != 0);
+    self["lat"]       = m_selfLat; self["lon"] = m_selfLon;
+    self["pubKey"]    = QString::fromLatin1(m_pubKey.toHex());
+    nodes.append(self);
+
+    int online = 1;
+    for (const meshcore::Contact& c : m_contacts) {
+        const QByteArray pk = toQB(c.publicKey);
+        const QString nm = c.name.empty()
+            ? QStringLiteral("!%1").arg(QString::fromLatin1(pk.left(4).toHex()))
+            : QString::fromStdString(c.name);
+        QJsonObject o;
+        o["num"]       = double(nodeNum(pk));
+        o["isSelf"]    = false;
+        o["name"]      = nm;
+        o["longName"]  = nm;
+        o["lastHeard"] = double(c.lastAdvert);
+        o["hasPos"]    = (c.lat != 0 || c.lon != 0);
+        o["lat"]       = c.lat; o["lon"] = c.lon;
+        o["pubKey"]    = QString::fromLatin1(pk.toHex());
+        o["role"]      = QStringLiteral("CONTACT");
+        nodes.append(o);
+        if (c.lastAdvert > 0 && (now - qint64(c.lastAdvert)) < 7200) ++online;
+    }
+    qInfo() << "meshcore_radio: nodes —" << nodes.size() << "(" << m_contacts.size() << "contacts)";
+    emit nodesDiscovered(nodes, nodes.size(), online);
 }
 
 void MeshCoreRadio::drainNext()
@@ -213,10 +280,9 @@ void MeshCoreRadio::sendToMesh(int channelIndex, const QString& text)
 
 void MeshCoreRadio::requestNodes()
 {
-    QJsonArray nodes;
-    QJsonObject self; self["num"] = 0; self["isSelf"] = true; self["name"] = m_nodeName;
-    nodes.append(self);
-    emit nodesDiscovered(nodes, 1, 1);
+    sendFrame(meshcore::cmdSendSelfAdvert(true));   // re-announce so neighbours keep us
+    requestContacts();                               // refresh the list (-> buildAndEmitNodes on reply)
+    buildAndEmitNodes();                             // emit what we already have immediately
 }
 
 void MeshCoreRadio::createChannel(const QString& name, const QByteArray& key)
@@ -240,10 +306,16 @@ void MeshCoreRadio::createChannel(const QString& name, const QByteArray& key)
     QTimer::singleShot(400, this, [this]() { m_chan.clear(); requestChannel(0); });
 }
 
-void MeshCoreRadio::setOwner(const QString& longName, const QString& /*shortName*/)
+void MeshCoreRadio::setOwner(const QString& longName, const QString& shortName)
 {
-    // MeshCore device-name set isn't wired yet; configure via the MeshCore app for now.
-    qInfo() << "meshcore_radio: setOwner not supported (ignored) —" << longName;
+    // MeshCore has a single adv_name (≤32 chars). Prefer the long name; fall back to the short one.
+    const QString name = (longName.trimmed().isEmpty() ? shortName : longName).trimmed();
+    if (name.isEmpty()) return;
+    sendFrame(meshcore::cmdSetAdvertName(name.toStdString()));   // persist our adv_name on the radio
+    sendFrame(meshcore::cmdSendSelfAdvert(true));                // re-announce so peers pick up the new name
+    m_nodeName = name;                                           // reflect locally
+    qInfo() << "meshcore_radio: setOwner — adv_name set to" << name;
+    buildAndEmitNodes();                                        // refresh self in the Nodes view
 }
 
 void MeshCoreRadio::addChannelFromUrl(const QString& url)
