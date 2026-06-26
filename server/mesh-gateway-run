@@ -5,18 +5,18 @@
 # `--quit-on-finish`, so it stays resident and relays autonomously. Which channels are
 # bridged is read from the gateway's own SQLite (set once with ./gwctl, persisted).
 #
-# Meant to be launched by systemd (see meshtastic-gateway.service) with Restart=always.
-# Override paths via the environment (or /etc/default/meshtastic-gateway, EnvironmentFile=).
+# Meant to be launched by systemd (see mesh-gateway.service) with Restart=always.
+# Override paths via the environment (or /etc/default/mesh-gateway, EnvironmentFile=).
 set -euo pipefail
 
 LOGOSCORE="${LOGOSCORE:-$HOME/.local/bin/logoscore}"
 MODULES_DIR="${MODULES_DIR:-$HOME/.local/share/Logos/LogosBasecampDev/modules}"
-# capability_module → token handshake, delivery_module → Waku, meshtastic_gateway → the bridge.
+# capability_module → token handshake, delivery_module → Waku, mesh_gateway → the bridge.
 # qr is UI-only and not needed headless. Order matters: deps before the target.
-MODULES="${MODULES:-capability_module,delivery_module,meshtastic_gateway}"
+MODULES="${MODULES:-capability_module,delivery_module,mesh_gateway}"
 
 if [[ ! -x "$LOGOSCORE" ]]; then
-  echo "meshtastic-gateway-run: logoscore not found/executable at '$LOGOSCORE'" >&2
+  echo "mesh-gateway-run: logoscore not found/executable at '$LOGOSCORE'" >&2
   echo "  set LOGOSCORE=/path/to/logoscore (see server/README.md)" >&2
   exit 1
 fi
@@ -27,5 +27,5 @@ fi
 pkill -9 -f logos_host 2>/dev/null || true
 sleep 1
 
-echo "meshtastic-gateway-run: starting logoscore ($MODULES)"
+echo "mesh-gateway-run: starting logoscore ($MODULES)"
 exec "$LOGOSCORE" -m "$MODULES_DIR" -l "$MODULES"

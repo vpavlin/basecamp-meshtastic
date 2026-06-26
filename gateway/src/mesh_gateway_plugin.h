@@ -9,7 +9,7 @@
 #include <QSet>
 #include <QStringList>
 #include <QSqlDatabase>
-#include "meshtastic_gateway_interface.h"
+#include "mesh_gateway_interface.h"
 
 class LogosAPI;
 class LogosAPIClient;
@@ -24,7 +24,7 @@ class MeshCoreRadio;
 // LM side: depends on delivery_module via Logos Core IPC. Each channel maps to a content topic
 // (md5(name+psk)[:16], or md5("idx:N") when unnamed); a per-channel opt-in relay bridges the two.
 // Chat history + relay prefs + settings persist in SQLite. The UI is fully signal-driven (events).
-class MeshtasticGatewayPlugin : public QObject, public MeshtasticGatewayInterface
+class MeshGatewayPlugin : public QObject, public MeshtasticGatewayInterface
 {
     Q_OBJECT
     // Embedded metadata uses metadata.embedded.json (NOT metadata.json) on purpose. Basecamp's
@@ -37,10 +37,10 @@ class MeshtasticGatewayPlugin : public QObject, public MeshtasticGatewayInterfac
     Q_INTERFACES(MeshtasticGatewayInterface PluginInterface)
 
 public:
-    explicit MeshtasticGatewayPlugin(QObject* parent = nullptr);
-    ~MeshtasticGatewayPlugin() override;
+    explicit MeshGatewayPlugin(QObject* parent = nullptr);
+    ~MeshGatewayPlugin() override;
 
-    QString name() const override { return "meshtastic_gateway"; }
+    QString name() const override { return "mesh_gateway"; }
     QString version() const override { return "0.1.0"; }
     Q_INVOKABLE void initLogos(LogosAPI* api);   // Q_INVOKABLE, not override (SDK convention)
 
@@ -151,7 +151,7 @@ private:
     QStringList m_seenFifo;             // FIFO to bound m_seen (evict oldest past cap)
     int m_clock = 0;                    // monotonic ordering counter (persisted; continues across restarts)
     int m_msgId = 0;                    // monotonic message id (for reactions / ack tracking; persisted)
-    QSqlDatabase m_db;                  // SQLite store (named connection "meshtastic_gateway")
+    QSqlDatabase m_db;                  // SQLite store (named connection "mesh_gateway")
     static constexpr int kMsgLoadLimit = 500;   // messages loaded into memory per channel (DB keeps all)
 
     // App-behavior settings (persisted in the settings table; see loadSettings/setSetting).

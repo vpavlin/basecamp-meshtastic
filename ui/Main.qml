@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// Meshtastic Gateway — desktop chat-style front-end for the meshtastic_gateway core module.
+// Mesh gateway — desktop chat front-end for the mesh_gateway core module (Meshtastic or MeshCore backend).
 // Left sidebar lists the connected node's channels (encryption badge, relay state, unread count);
 // right pane is the per-channel chat (sender names, delivery/ack status, emoji reactions, reply).
 // Self-contained styling: ui_qml runs sandboxed, so we reproduce the Logos palette here.
@@ -14,6 +14,7 @@ Item {
     property string linkState: "searching"     // searching | connecting | connected (LoRa node)
     property string deliveryState: "down"      // down | connecting | ready (Logos Messaging)
     property string nodeName: ""
+    property string protocol: ""               // active backend: "meshcore" | "meshtastic"
     property int relayingCount: 0
     property int nodesTotal: 0
     property int nodesOnline: 0
@@ -68,7 +69,7 @@ Item {
         if (typeof logos === "undefined" || !logos.callModule) return
         // Defer so a click handler / event handler returns before the IPC round-trip starts.
         Qt.callLater(function () {
-            try { logos.callModule("meshtastic_gateway", method, args || []) } catch (e) {}
+            try { logos.callModule("mesh_gateway", method, args || []) } catch (e) {}
         })
     }
 
@@ -80,6 +81,7 @@ Item {
             root.linkState = st.linkState || (st.nodePresent ? "connected" : "searching")
             root.deliveryState = st.deliveryState || "down"
             root.nodeName = st.nodeName || ""
+            root.protocol = st.protocol || ""
             root.nodesTotal = st.nodesTotal || 0
             root.nodesOnline = st.nodesOnline || 0
         } catch (e) { /* ignore malformed */ }
@@ -308,12 +310,12 @@ Item {
     // No polling Timer, no synchronous data pulls — everything below renders from events.
     Component.onCompleted: {
         if (typeof logos !== "undefined" && logos.onModuleEvent) {
-            logos.onModuleEvent("meshtastic_gateway", "nodeStatus")
-            logos.onModuleEvent("meshtastic_gateway", "channelsChanged")
-            logos.onModuleEvent("meshtastic_gateway", "messagesChanged")
-            logos.onModuleEvent("meshtastic_gateway", "nodesChanged")
-            logos.onModuleEvent("meshtastic_gateway", "settingsChanged")
-            logos.onModuleEvent("meshtastic_gateway", "ownerSaved")
+            logos.onModuleEvent("mesh_gateway", "nodeStatus")
+            logos.onModuleEvent("mesh_gateway", "channelsChanged")
+            logos.onModuleEvent("mesh_gateway", "messagesChanged")
+            logos.onModuleEvent("mesh_gateway", "nodesChanged")
+            logos.onModuleEvent("mesh_gateway", "settingsChanged")
+            logos.onModuleEvent("mesh_gateway", "ownerSaved")
         }
         gw("requestSnapshot")
     }
@@ -327,7 +329,7 @@ Item {
         //   channelsChanged -> d[0] = channels JSON
         //   messagesChanged -> d[0] = channelIndex, d[1] = that channel's messages JSON
         function onModuleEventReceived(m, e, d) {
-            if (m !== "meshtastic_gateway") return
+            if (m !== "mesh_gateway") return
             if (e === "nodeStatus")           root.applyStatus(d[0])
             else if (e === "channelsChanged") root.applyChannels(d[0])
             else if (e === "messagesChanged") root.applyMessages(d[0], d[1])
@@ -385,8 +387,25 @@ Item {
                             }
                         }
                         Text {
-                            text: "Meshtastic"; color: root.t.text
+                            text: "Mesh"; color: root.t.text
                             font.pixelSize: root.t.fTitle; font.weight: Font.DemiBold
+                        }
+                        // active-backend badge — which implementation is driving this gateway
+                        Rectangle {
+                            visible: root.protocol !== ""
+                            radius: 4
+                            color: root.protocol === "meshcore" ? root.t.primary : root.t.bg
+                            border.width: 1
+                            border.color: root.protocol === "meshcore" ? root.t.primary : root.t.border
+                            implicitWidth: protoLabel.implicitWidth + 12
+                            implicitHeight: protoLabel.implicitHeight + 6
+                            Text {
+                                id: protoLabel; anchors.centerIn: parent
+                                text: root.protocol === "meshcore" ? "MeshCore"
+                                    : root.protocol === "meshtastic" ? "Meshtastic" : root.protocol
+                                color: root.protocol === "meshcore" ? root.t.onPrimary : root.t.textSec
+                                font.pixelSize: root.t.fSmall; font.weight: Font.DemiBold
+                            }
                         }
                         Item { Layout.fillWidth: true }
                         // settings gear
@@ -628,7 +647,7 @@ Item {
                             visible: channels.count === 0
                             width: parent.width - 20; horizontalAlignment: Text.AlignHCenter
                             wrapMode: Text.Wrap
-                            text: "No channels — connect a Meshtastic node"
+                            text: "No channels — connect a mesh node"
                             color: root.t.textMuted; font.pixelSize: root.t.fSmall
                         }
                     }
@@ -743,7 +762,7 @@ Item {
                         text: root.linkState === "noperm"
                                 ? "Can't open the serial device.\nClose any other app using the node (or a second Basecamp), or grant your user serial access:\nsudo usermod -aG dialout $USER   — then log out and back in."
                             : root.nodePresent ? "Select a channel to start chatting"
-                                               : "Waiting for a Meshtastic node…"
+                                               : "Waiting for a mesh node…"
                         color: root.linkState === "noperm" ? root.t.warn : root.t.textSec
                         font.pixelSize: root.t.fBody
                     }

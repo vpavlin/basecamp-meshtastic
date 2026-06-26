@@ -6,15 +6,15 @@ to the internet over Logos Messaging.
 
 ## Modules
 
-- **`gateway/`** — `meshtastic_gateway` (`core`, C++): talks to a USB-attached Meshtastic node over the
+- **`gateway/`** — `mesh_gateway` (`core`, C++): talks to a USB-attached Meshtastic node over the
   native **StreamAPI** (QtSerialPort + meshtastic protobufs generated at build time). It reads the
   node's channels and NodeDB, sends/receives text, writes node/channel config via `AdminMessage`, and
   bridges each channel to a Logos Messaging content topic via `delivery_module` (Logos Core IPC). Chat
   history, relay preferences and settings persist in **SQLite**. Degrades gracefully with no radio.
-- **`ui/`** — `meshtastic_gateway_ui` (`ui_qml`): the desktop UI. Fully **signal-driven** — it never
+- **`ui/`** — `mesh_gateway_ui` (`ui_qml`): the desktop UI. Fully **signal-driven** — it never
   blocks on IPC; the backend pushes state via events and the UI renders from them.
 
-The UI depends on `meshtastic_gateway` and `qr`; the gateway depends on `delivery_module` (stock). Each
+The UI depends on `mesh_gateway` and `qr`; the gateway depends on `delivery_module` (stock). Each
 channel maps to a content topic `md5(name+psk)[:16]` (or `md5("idx:N")` when unnamed) →
 `/meshtastic/1/<hash>/proto`, so only holders of the channel name+PSK can compute it.
 
@@ -55,7 +55,7 @@ then the app (open the UI last — it auto-loads its dependencies):
    (Only the core service is needed — you can skip `qr_ui`.)
 3. **Meshtastic Gateway** — from the
    [latest release](https://github.com/vpavlin/basecamp-meshtastic/releases/latest), download the **core**
-   (`…meshtastic_gateway-module-lib…`) and **UI** (`…meshtastic_gateway_ui-module…`) `.lgx`, picking the
+   (`…mesh_gateway-module-lib…`) and **UI** (`…mesh_gateway_ui-module…`) `.lgx`, picking the
    asset for your architecture (**`-linux-amd64`** for a PC, **`-linux-arm64`** for a Raspberry Pi), then
    install both.
 
@@ -107,7 +107,7 @@ CI builds both on every `v*` tag and attaches the `.lgx` files to a GitHub Relea
 - **LoRa:** Meshtastic encrypts on-air with the channel PSK; the radio decrypts before handing messages
   to the gateway over USB (no crypto in the gateway on the mesh side).
 - **Logos Messaging relay:** the relayed payload is **AES-256-GCM encrypted** with a key derived from
-  the channel PSK — `SHA-256("meshtastic-gateway/lm-relay/v1\n" + psk)`. The derivation is deterministic,
+  the channel PSK — `SHA-256("mesh-gateway/lm-relay/v1\n" + psk)`. The derivation is deterministic,
   so every member (who already shares the channel name + PSK) computes the same key and can decrypt, while
   a network observer on the Waku content topic sees only ciphertext. So a **private channel stays private
   end to end**. Channels with no PSK are relayed in plaintext (they're unencrypted on LoRa too).

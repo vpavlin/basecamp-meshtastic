@@ -33,13 +33,13 @@ There's no separate daemon binary — the GUI-less Logos host is **`logoscore`**
 the gateway and its dependencies:
 
 ```bash
-logoscore -m <modules-dir> -l capability_module,delivery_module,meshtastic_gateway
+logoscore -m <modules-dir> -l capability_module,delivery_module,mesh_gateway
 ```
 
-- `capability_module` — token handshake, `delivery_module` — Waku, `meshtastic_gateway` — the bridge.
+- `capability_module` — token handshake, `delivery_module` — Waku, `mesh_gateway` — the bridge.
   Order matters (deps first). `qr` is UI-only and **not** needed headless.
 - **Which channels are relayed comes from the gateway's SQLite**
-  (`~/.local/share/logos_host/meshtastic_gateway/gateway.db`). Set it once with `gwctl` (below), and
+  (`~/.local/share/logos_host/mesh_gateway/gateway.db`). Set it once with `gwctl` (below), and
   every restart resumes those channels. Channel 0 (public/default) is never relayed.
 
 ## Install (systemd --user)
@@ -54,8 +54,8 @@ git clone https://github.com/vpavlin/basecamp-meshtastic && cd basecamp-meshtast
 ./install.sh
 ```
 
-This drops `meshtastic-gateway-run` + `gwctl` into `~/.local/bin`, writes
-`~/.config/meshtastic-gateway.env` (the resolved paths), installs the user unit, enables it, and turns
+This drops `mesh-gateway-run` + `gwctl` into `~/.local/bin`, writes
+`~/.config/mesh-gateway.env` (the resolved paths), installs the user unit, enables it, and turns
 on linger (so it runs without you being logged in).
 
 ## Configure without the UI — `gwctl`
@@ -66,7 +66,7 @@ waits for the radio's config burst, calls the matching `Q_INVOKABLE`, and persis
 > The daemon and `gwctl` share the serial port + DB, so **stop the service while configuring**:
 
 ```bash
-systemctl --user stop meshtastic-gateway
+systemctl --user stop mesh-gateway
 
 gwctl channels                 # list channels: index, relay state, psk type, name
 gwctl relay 1 on               # bridge channel 1  (refuses channel 0)
@@ -76,8 +76,8 @@ gwctl name "Relay Node" RLY    # set the node's display name (written to the rad
 gwctl set onlineWindowSec 7200 # settings: onlineWindowSec | maxMsgsPerChannel | distanceUnit
 gwctl status                   # node + delivery status
 
-systemctl --user start meshtastic-gateway
-journalctl --user -u meshtastic-gateway -f      # watch it relay
+systemctl --user start mesh-gateway
+journalctl --user -u mesh-gateway -f      # watch it relay
 ```
 
 Channels themselves come from the **radio** — configure those with the standard Meshtastic app/CLI (or
@@ -116,7 +116,7 @@ Then add the channel + enable relay headlessly and start the unit:
 ```bash
 gwctl join 'https://meshtastic.org/e/#…'   # adds the channel to the radio
 gwctl relay 2 on                            # persists to SQLite
-systemctl --user enable --now meshtastic-gateway
+systemctl --user enable --now mesh-gateway
 ```
 
 **The dep-crash bug is NOT present** in current builds — `delivery_module` (a dependency-declaring
@@ -128,9 +128,9 @@ relaying. On an **x86_64 server** none of steps 1–3 are needed — the dev Bas
 
 | File | Purpose |
 |---|---|
-| `meshtastic-gateway-run` | the daemon command (cleans stale hosts, execs `logoscore`) |
+| `mesh-gateway-run` | the daemon command (cleans stale hosts, execs `logoscore`) |
 | `gwctl` | headless configuration (relay toggles, join, name, settings) |
-| `meshtastic-gateway.service` | systemd `--user` unit (`Restart=always`) |
+| `mesh-gateway.service` | systemd `--user` unit (`Restart=always`) |
 | `install.sh` | installs the above + enables the service |
 
 ## Troubleshooting

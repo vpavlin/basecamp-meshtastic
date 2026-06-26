@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(MeshtasticGatewayPlugin LANGUAGES CXX)
+project(MeshGatewayPlugin LANGUAGES CXX)
 
 if(DEFINED ENV{LOGOS_MODULE_BUILDER_ROOT})
     include($ENV{LOGOS_MODULE_BUILDER_ROOT}/cmake/LogosModule.cmake)
@@ -8,11 +8,11 @@ else()
 endif()
 
 logos_module(
-    NAME meshtastic_gateway
+    NAME mesh_gateway
     SOURCES
-        src/meshtastic_gateway_interface.h
-        src/meshtastic_gateway_plugin.h
-        src/meshtastic_gateway_plugin.cpp
+        src/mesh_gateway_interface.h
+        src/mesh_gateway_plugin.h
+        src/mesh_gateway_plugin.cpp
         src/mesh_radio.h
         src/meshcore_protocol.h
         src/meshcore_protocol.cpp
@@ -34,15 +34,15 @@ file(GLOB MESH_PROTOS ${CMAKE_CURRENT_SOURCE_DIR}/proto/meshtastic/*.proto)
 list(APPEND MESH_PROTOS ${CMAKE_CURRENT_SOURCE_DIR}/proto/nanopb.proto)
 
 protobuf_generate(
-    TARGET meshtastic_gateway_module_plugin
+    TARGET mesh_gateway_module_plugin
     LANGUAGE cpp
     IMPORT_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/proto
     PROTOC_OUT_DIR ${MESH_GEN_DIR}
     PROTOS ${MESH_PROTOS}
 )
 
-target_include_directories(meshtastic_gateway_module_plugin PRIVATE ${MESH_GEN_DIR})
-target_link_libraries(meshtastic_gateway_module_plugin PRIVATE
+target_include_directories(mesh_gateway_module_plugin PRIVATE ${MESH_GEN_DIR})
+target_link_libraries(mesh_gateway_module_plugin PRIVATE
     protobuf::libprotobuf
     Qt6::SerialPort
     Qt6::Sql

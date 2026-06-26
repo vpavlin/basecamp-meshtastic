@@ -95,7 +95,7 @@ user ──▶ Gateway [origin=local]
 ## Implementation — how each leg actually connects (code map)
 
 Both legs are implemented and verified against a physical Meshtastic node (bidirectional).
-Everything lives in `gateway/src/meshtastic_gateway_plugin.cpp`.
+Everything lives in `gateway/src/mesh_gateway_plugin.cpp`.
 
 ### Mesh leg — native USB serial (QtSerialPort + meshtastic protobufs)
 
