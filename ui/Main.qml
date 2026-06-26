@@ -45,6 +45,7 @@ Item {
     // ── settings (persisted backend-side; see settingsChanged) ────
     property var settings: ({ onlineWindowSec: 7200, maxMsgsPerChannel: 0, distanceUnit: "km" })
     property bool settingsOpen: false
+    property bool ownerSaved: false      // transient "✓ Saved" flash in the settings modal
 
     readonly property var reactChoices: ["👍", "❤️", "😂", "🔥", "‼️"]
 
@@ -312,10 +313,12 @@ Item {
             logos.onModuleEvent("meshtastic_gateway", "messagesChanged")
             logos.onModuleEvent("meshtastic_gateway", "nodesChanged")
             logos.onModuleEvent("meshtastic_gateway", "settingsChanged")
+            logos.onModuleEvent("meshtastic_gateway", "ownerSaved")
         }
         gw("requestSnapshot")
     }
     Timer { id: statusTimer; interval: 2600; onTriggered: root.statusMsg = "" }
+    Timer { id: ownerSavedTimer; interval: 2600; onTriggered: root.ownerSaved = false }
     Connections {
         target: typeof logos !== "undefined" ? logos : null
         ignoreUnknownSignals: true
@@ -330,6 +333,7 @@ Item {
             else if (e === "messagesChanged") root.applyMessages(d[0], d[1])
             else if (e === "nodesChanged")    root.applyNodes(d[0])
             else if (e === "settingsChanged") root.applySettings(d[0])
+            else if (e === "ownerSaved")      { root.ownerSaved = true; ownerSavedTimer.restart() }
         }
     }
 
@@ -1419,8 +1423,10 @@ Item {
                     }
                     Text {
                         Layout.fillWidth: true; wrapMode: Text.Wrap
-                        text: "Short name is up to 4 characters, shown as your tag on other nodes."
-                        color: root.t.textMuted; font.pixelSize: 10
+                        text: root.ownerSaved ? "✓ Saved — name written to the radio"
+                                              : "Short name is up to 4 characters, shown as your tag on other nodes."
+                        color: root.ownerSaved ? "#3fb950" : root.t.textMuted
+                        font.pixelSize: 10; font.weight: root.ownerSaved ? Font.DemiBold : Font.Normal
                     }
                 }
 
