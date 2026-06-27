@@ -1,7 +1,8 @@
-#include "meshtastic_gateway_plugin.h"
+#include "mesh_gateway_plugin.h"
 #include "logos_api.h"
 #include "logos_api_client.h"
 #include "token_manager.h"
+#include "meshcore_radio.h"
 
 #include <cmath>
 #include <QCryptographicHash>
@@ -27,10 +28,10 @@
 #include <openssl/evp.h>
 #include <openssl/rand.h>
 
-MeshtasticGatewayPlugin::MeshtasticGatewayPlugin(QObject* parent) : QObject(parent) {}
-MeshtasticGatewayPlugin::~MeshtasticGatewayPlugin() = default;
+MeshGatewayPlugin::MeshGatewayPlugin(QObject* parent) : QObject(parent) {}
+MeshGatewayPlugin::~MeshGatewayPlugin() = default;
 
-void MeshtasticGatewayPlugin::initLogos(LogosAPI* api)
+void MeshGatewayPlugin::initLogos(LogosAPI* api)
 {
     logosAPI = api;     // PluginInterface public field — SDK's QtProviderObject reads THIS to
                         // dispatch incoming IPC; without it every callMethod fails with
@@ -38,12 +39,47 @@ void MeshtasticGatewayPlugin::initLogos(LogosAPI* api)
     m_logosAPI = api;
     openDb();           // restore persisted messages/relay prefs before we connect to the radio
     emitStatus();
-    qInfo() << "meshtastic_gateway: init, node present" << m_nodePresent
+    qInfo() << "mesh_gateway: init, node present" << m_nodePresent
             << "channels" << m_channels.size();
     // Defer delivery setup off the QRO reply thread (createNode/start are slow + async).
     QTimer::singleShot(0, this, [this]() { initDelivery(); });
-    // Connect to the Meshtastic radio over USB serial.
-    QTimer::singleShot(0, this, [this]() { openSerial(); });
+
+    // Mesh backend selection: Meshtastic (StreamAPI, inline below) is the default; MESH_PROTOCOL=meshcore
+    // drives the MeshCore companion protocol via MeshCoreRadio. The LM relay / encryption / dedup / DB /
+    // UI layer is protocol-agnostic, so a MeshCore backend plugs into the same rebuildChannelsFromMesh +
+    // onMeshMessage path. The channel object MeshCoreRadio emits is exactly what rebuildChannelsFromMesh
+    // expects ({channelIndex,name,psk,role}), and sendToMesh()/the admin ops branch on m_useMeshCore.
+    m_useMeshCore = (qgetenv("MESH_PROTOCOL").toLower() == "meshcore");
+    if (m_useMeshCore) {
+        qInfo() << "mesh_gateway: mesh backend = MeshCore (companion protocol)";
+        m_mcRadio = new MeshCoreRadio(this);
+        connect(m_mcRadio, &MeshRadio::channelsDiscovered, this, &MeshGatewayPlugin::rebuildChannelsFromMesh);
+        connect(m_mcRadio, &MeshRadio::meshMessage, this, &MeshGatewayPlugin::onMeshMessage);
+        connect(m_mcRadio, &MeshRadio::linkStateChanged, this,
+                [this](const QString& s, bool present, const QString& name) {
+            m_linkState = s; m_nodePresent = present; if (!name.isEmpty()) m_nodeName = name;
+            emitStatus();
+        });
+        connect(m_mcRadio, &MeshRadio::nodesDiscovered, this,
+                [this](const QJsonArray& nodes, int total, int online) {
+            // MeshCore backend supplies a ready node list (self + contacts); feed it through the
+            // shared m_nodes/emitNodes path so the Nodes view renders identically to Meshtastic.
+            m_nodes.clear();
+            for (const QJsonValue& v : nodes) {
+                const QJsonObject o = v.toObject();
+                const quint32 num = quint32(o.value("num").toDouble());
+                if (o.value("isSelf").toBool()) m_myNum = num;
+                m_nodes[num] = o;
+            }
+            m_nodesTotal = total; m_nodesOnline = online;
+            emitNodes();
+            emitStatus();
+        });
+        QTimer::singleShot(0, this, [this]() { m_mcRadio->start(); });
+    } else {
+        // Connect to the Meshtastic radio over USB serial.
+        QTimer::singleShot(0, this, [this]() { openSerial(); });
+    }
 }
 
 // REAL derivation (final): only someone holding the channel name+psk can compute the topic, so it
@@ -59,7 +95,7 @@ static QString prettyPreset(const QString& e)
 
 // Meshtastic share URL: base64url(ChannelSet{ one ChannelSettings }) → https://meshtastic.org/e/#…
 // A device that opens this adds the channel (name + psk). Single-channel share, no lora_config.
-QString MeshtasticGatewayPlugin::channelShareUrl(const QString& name, const QByteArray& psk)
+QString MeshGatewayPlugin::channelShareUrl(const QString& name, const QByteArray& psk)
 {
     meshtastic::ChannelSet set;
     meshtastic::ChannelSettings* s = set.add_settings();
@@ -71,31 +107,31 @@ QString MeshtasticGatewayPlugin::channelShareUrl(const QString& name, const QByt
     return "https://meshtastic.org/e/#" + QString::fromLatin1(b64);
 }
 
-QString MeshtasticGatewayPlugin::deriveTopic(const QString& name, const QByteArray& psk, int index)
+QString MeshGatewayPlugin::deriveTopic(const QString& name, const QByteArray& psk, int index)
 {
     QByteArray id = name.isEmpty() ? ("idx:" + QByteArray::number(index))
                                    : (name.toUtf8() + psk);
     QString h = QString::fromLatin1(
         QCryptographicHash::hash(id, QCryptographicHash::Md5).toHex().left(16));
-    return "/meshtastic/1/" + h + "/proto";
+    return "/mesh/1/" + h + "/proto";
 }
 
 // --- SQLite persistence ------------------------------------------------
 // One file under the app data dir; messages + relay prefs keyed by topic (stable across reconnects).
 
-void MeshtasticGatewayPlugin::openDb()
+void MeshGatewayPlugin::openDb()
 {
     if (m_db.isOpen()) return;
     QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     if (dir.isEmpty()) dir = QDir::homePath() + "/.local/share";
-    dir += "/meshtastic_gateway";
+    dir += "/mesh_gateway";
     QDir().mkpath(dir);
     const QString path = dir + "/gateway.db";
 
-    m_db = QSqlDatabase::addDatabase("QSQLITE", "meshtastic_gateway");
+    m_db = QSqlDatabase::addDatabase("QSQLITE", "mesh_gateway");
     m_db.setDatabaseName(path);
     if (!m_db.open()) {
-        qWarning() << "meshtastic_gateway: cannot open DB" << path << "-" << m_db.lastError().text();
+        qWarning() << "mesh_gateway: cannot open DB" << path << "-" << m_db.lastError().text();
         return;
     }
     QSqlQuery q(m_db);
@@ -113,10 +149,10 @@ void MeshtasticGatewayPlugin::openDb()
         m_clock = q.value(1).toInt();
     }
     loadSettings();
-    qInfo() << "meshtastic_gateway: DB open" << path << "— resume msgId" << m_msgId << "clock" << m_clock;
+    qInfo() << "mesh_gateway: DB open" << path << "— resume msgId" << m_msgId << "clock" << m_clock;
 }
 
-void MeshtasticGatewayPlugin::persistMessage(int channelIndex, const QJsonObject& m)
+void MeshGatewayPlugin::persistMessage(int channelIndex, const QJsonObject& m)
 {
     if (!m_db.isOpen()) return;
     const QString topic = topicFor(channelIndex);
@@ -135,7 +171,7 @@ void MeshtasticGatewayPlugin::persistMessage(int channelIndex, const QJsonObject
     q.addBindValue(m.value("relayed").toBool() ? 1 : 0);
     q.addBindValue(m.value("ackStatus").toString());
     q.addBindValue(QString::fromUtf8(QJsonDocument(m.value("reactions").toArray()).toJson(QJsonDocument::Compact)));
-    if (!q.exec()) { qWarning() << "meshtastic_gateway: persistMessage failed:" << q.lastError().text(); return; }
+    if (!q.exec()) { qWarning() << "mesh_gateway: persistMessage failed:" << q.lastError().text(); return; }
 
     // Retention: prune oldest rows for this topic beyond the cap (0 = unlimited).
     if (m_maxMsgsPerChannel > 0) {
@@ -149,7 +185,7 @@ void MeshtasticGatewayPlugin::persistMessage(int channelIndex, const QJsonObject
     }
 }
 
-QJsonArray MeshtasticGatewayPlugin::loadMessages(const QString& topic, int limit)
+QJsonArray MeshGatewayPlugin::loadMessages(const QString& topic, int limit)
 {
     QJsonArray arr;
     if (!m_db.isOpen() || topic.isEmpty()) return arr;
@@ -159,7 +195,7 @@ QJsonArray MeshtasticGatewayPlugin::loadMessages(const QString& topic, int limit
               " WHERE topic=? ORDER BY ts DESC, msgid DESC LIMIT ?");
     q.addBindValue(topic);
     q.addBindValue(limit);
-    if (!q.exec()) { qWarning() << "meshtastic_gateway: loadMessages failed:" << q.lastError().text(); return arr; }
+    if (!q.exec()) { qWarning() << "mesh_gateway: loadMessages failed:" << q.lastError().text(); return arr; }
     QList<QJsonObject> rows;
     while (q.next()) {
         QJsonObject o;
@@ -178,7 +214,7 @@ QJsonArray MeshtasticGatewayPlugin::loadMessages(const QString& topic, int limit
     return arr;
 }
 
-void MeshtasticGatewayPlugin::saveRelayPref(const QString& topic, bool relaying)
+void MeshGatewayPlugin::saveRelayPref(const QString& topic, bool relaying)
 {
     if (!m_db.isOpen() || topic.isEmpty()) return;
     QSqlQuery q(m_db);
@@ -188,7 +224,7 @@ void MeshtasticGatewayPlugin::saveRelayPref(const QString& topic, bool relaying)
     q.exec();
 }
 
-bool MeshtasticGatewayPlugin::loadRelayPref(const QString& topic, bool fallback)
+bool MeshGatewayPlugin::loadRelayPref(const QString& topic, bool fallback)
 {
     if (!m_db.isOpen() || topic.isEmpty()) return fallback;
     QSqlQuery q(m_db);
@@ -198,7 +234,7 @@ bool MeshtasticGatewayPlugin::loadRelayPref(const QString& topic, bool fallback)
     return fallback;
 }
 
-void MeshtasticGatewayPlugin::loadSettings()
+void MeshGatewayPlugin::loadSettings()
 {
     if (!m_db.isOpen()) return;
     QSqlQuery q(m_db);
@@ -211,7 +247,7 @@ void MeshtasticGatewayPlugin::loadSettings()
     }
 }
 
-void MeshtasticGatewayPlugin::emitSettings()
+void MeshGatewayPlugin::emitSettings()
 {
     QJsonObject o;
     o["onlineWindowSec"] = m_onlineWindowSec;
@@ -221,12 +257,12 @@ void MeshtasticGatewayPlugin::emitSettings()
         QVariantList() << QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact)));
 }
 
-void MeshtasticGatewayPlugin::requestSettings()
+void MeshGatewayPlugin::requestSettings()
 {
     emitSettings();
 }
 
-void MeshtasticGatewayPlugin::setSetting(const QString& key, const QString& value)
+void MeshGatewayPlugin::setSetting(const QString& key, const QString& value)
 {
     // validate/apply known keys
     if (key == "onlineWindowSec")        m_onlineWindowSec   = qMax(60, value.toInt());
@@ -249,24 +285,24 @@ void MeshtasticGatewayPlugin::setSetting(const QString& key, const QString& valu
 //   empty     -> "none"     (red, unencrypted)
 //   "AQ=="    -> "default"  (yellow key, the well-known default LongFast key)
 //   anything  -> "custom"   (green lock, a real shared secret)
-QString MeshtasticGatewayPlugin::pskStatus(const QString& pskB64)
+QString MeshGatewayPlugin::pskStatus(const QString& pskB64)
 {
     if (pskB64.isEmpty()) return QStringLiteral("none");
     if (pskB64 == QStringLiteral("AQ==")) return QStringLiteral("default");
     return QStringLiteral("custom");
 }
 
-QString MeshtasticGatewayPlugin::getChannels()
+QString MeshGatewayPlugin::getChannels()
 {
     return QString::fromUtf8(QJsonDocument(m_channels).toJson(QJsonDocument::Compact));
 }
 
-void MeshtasticGatewayPlugin::setRelay(int index, bool enabled)
+void MeshGatewayPlugin::setRelay(int index, bool enabled)
 {
     // Hard rule: channel 0 (the public/default channel) is NEVER relayed — privacy + airtime.
     // The UI hides its toggle, but headless config (logoscore -c) could call this, so guard here too.
     if (index == 0 && enabled) {
-        qWarning() << "meshtastic_gateway: refusing relay ON for channel 0 (public/default channel)";
+        qWarning() << "mesh_gateway: refusing relay ON for channel 0 (public/default channel)";
         return;
     }
     for (int i = 0; i < m_channels.size(); ++i) {
@@ -275,7 +311,7 @@ void MeshtasticGatewayPlugin::setRelay(int index, bool enabled)
             c["relaying"] = enabled;
             m_channels[i] = c;
             const QString topic = c["topic"].toString();
-            qInfo() << "meshtastic_gateway: relay" << (enabled ? "ON" : "off")
+            qInfo() << "mesh_gateway: relay" << (enabled ? "ON" : "off")
                     << "for channel" << index << "->" << topic;
             saveRelayPref(topic, enabled);
 
@@ -298,13 +334,14 @@ void MeshtasticGatewayPlugin::setRelay(int index, bool enabled)
     }
 }
 
-QString MeshtasticGatewayPlugin::status()
+QString MeshGatewayPlugin::status()
 {
     QJsonObject o;
     o["nodePresent"] = m_nodePresent;
     o["linkState"] = m_linkState;            // searching | connecting | connected (LoRa node)
     o["deliveryState"] = m_deliveryState;    // down | connecting | ready (Logos Messaging)
     o["nodeName"] = m_nodeName;
+    o["protocol"] = m_useMeshCore ? QStringLiteral("meshcore") : QStringLiteral("meshtastic");  // active backend
     o["channelCount"] = m_channels.size();
     o["nodesTotal"] = m_nodesTotal;     // mesh nodes known to the local node
     o["nodesOnline"] = m_nodesOnline;   // heard within the activity window
@@ -313,17 +350,17 @@ QString MeshtasticGatewayPlugin::status()
 
 // --- Event emitters: every event carries its full state so the UI never pulls (no blocking IPC) ---
 
-void MeshtasticGatewayPlugin::emitChannels()
+void MeshGatewayPlugin::emitChannels()
 {
     emit eventResponse("channelsChanged", QVariantList() << getChannels());
 }
 
-void MeshtasticGatewayPlugin::emitStatus()
+void MeshGatewayPlugin::emitStatus()
 {
     emit eventResponse("nodeStatus", QVariantList() << status());
 }
 
-void MeshtasticGatewayPlugin::emitMessages(int channelIndex)
+void MeshGatewayPlugin::emitMessages(int channelIndex)
 {
     emit eventResponse("messagesChanged",
                        QVariantList() << channelIndex << getMessages(channelIndex));
@@ -348,7 +385,7 @@ static double bearingDegrees(double lat1, double lon1, double lat2, double lon2)
     return b < 0 ? b + 360.0 : b;
 }
 
-void MeshtasticGatewayPlugin::emitNodes()
+void MeshGatewayPlugin::emitNodes()
 {
     const qint64 now = QDateTime::currentSecsSinceEpoch();
     // Our own position (if known) anchors distance/bearing for every other node.
@@ -376,7 +413,7 @@ void MeshtasticGatewayPlugin::emitNodes()
 }
 
 // Fire-and-forget pull replacements: the UI calls these (return ignored) and renders on the event.
-void MeshtasticGatewayPlugin::requestSnapshot()
+void MeshGatewayPlugin::requestSnapshot()
 {
     emitStatus();
     emitChannels();
@@ -384,19 +421,19 @@ void MeshtasticGatewayPlugin::requestSnapshot()
     emitSettings();
 }
 
-void MeshtasticGatewayPlugin::requestMessages(int channelIndex)
+void MeshGatewayPlugin::requestMessages(int channelIndex)
 {
     emitMessages(channelIndex);
 }
 
-void MeshtasticGatewayPlugin::requestNodes()
+void MeshGatewayPlugin::requestNodes()
 {
     emitNodes();
 }
 
 // Live NodeInfo can arrive in bursts (250-node mesh); coalesce into one full-list emit per window
 // so the UI doesn't re-parse/re-render the whole node list dozens of times a second (that froze it).
-void MeshtasticGatewayPlugin::scheduleNodesEmit()
+void MeshGatewayPlugin::scheduleNodesEmit()
 {
     if (m_nodesEmitPending) return;
     m_nodesEmitPending = true;
@@ -405,7 +442,7 @@ void MeshtasticGatewayPlugin::scheduleNodesEmit()
 
 // --- Relay / loop-prevention (see DATAFLOWS.md) -------------------------
 
-bool MeshtasticGatewayPlugin::isRelaying(int channelIndex) const
+bool MeshGatewayPlugin::isRelaying(int channelIndex) const
 {
     for (const auto& v : m_channels) {
         const QJsonObject c = v.toObject();
@@ -414,7 +451,7 @@ bool MeshtasticGatewayPlugin::isRelaying(int channelIndex) const
     return false;
 }
 
-QString MeshtasticGatewayPlugin::topicFor(int channelIndex) const
+QString MeshGatewayPlugin::topicFor(int channelIndex) const
 {
     for (const auto& v : m_channels) {
         const QJsonObject c = v.toObject();
@@ -423,7 +460,7 @@ QString MeshtasticGatewayPlugin::topicFor(int channelIndex) const
     return QString();
 }
 
-QString MeshtasticGatewayPlugin::fingerprint(int channelIndex, const QString& text)
+QString MeshGatewayPlugin::fingerprint(int channelIndex, const QString& text)
 {
     // Text-based fingerprint for the PoC. Production keys on source-assigned packet ids
     // (Meshtastic packet id / Waku message hash) — see DATAFLOWS.md "Robust identity".
@@ -434,13 +471,13 @@ QString MeshtasticGatewayPlugin::fingerprint(int channelIndex, const QString& te
 // The one rule that stops echo storms: if we've already bridged this fingerprint, it's an echo of
 // our own relay coming back from the other network — suppress it. Otherwise record it (so the echo
 // that WILL come back is pre-suppressed) and forward to the opposite network.
-bool MeshtasticGatewayPlugin::maybeRelay(int channelIndex, const QString& text, const QString& origin)
+bool MeshGatewayPlugin::maybeRelay(int channelIndex, const QString& text, const QString& origin)
 {
     if (!isRelaying(channelIndex)) return false;
 
     const QString fp = fingerprint(channelIndex, text);
     if (m_seen.contains(fp)) {
-        qInfo() << "meshtastic_gateway: dedup — suppressing" << origin
+        qInfo() << "mesh_gateway: dedup — suppressing" << origin
                 << "echo on ch" << channelIndex << "(already bridged)";
         return false;
     }
@@ -450,7 +487,7 @@ bool MeshtasticGatewayPlugin::maybeRelay(int channelIndex, const QString& text, 
 
     // maybeRelay is the LM-publish direction (local send, or future mesh-inbound). Inbound LM
     // messages take the onDeliveryMessage() path instead.
-    qInfo() << "meshtastic_gateway: relay" << origin << "->LM ch" << channelIndex;
+    qInfo() << "mesh_gateway: relay" << origin << "->LM ch" << channelIndex;
     publishToLM(channelIndex, text);
     return true;
 }
@@ -459,14 +496,14 @@ bool MeshtasticGatewayPlugin::maybeRelay(int channelIndex, const QString& text, 
 
 // Update the Logos Messaging indicator; only re-emit status when it actually changes (initDelivery
 // retries every 500 ms, so unconditional emits would spam the UI).
-void MeshtasticGatewayPlugin::setDeliveryState(const QString& s)
+void MeshGatewayPlugin::setDeliveryState(const QString& s)
 {
     if (m_deliveryState == s) return;
     m_deliveryState = s;
     emitStatus();
 }
 
-void MeshtasticGatewayPlugin::initDelivery()
+void MeshGatewayPlugin::initDelivery()
 {
     if (!m_logosAPI) return;
 
@@ -478,7 +515,7 @@ void MeshtasticGatewayPlugin::initDelivery()
     // which seeds real tokens itself. See Sina's headless-delivery-events writeup.
     TokenManager& tm = TokenManager::instance();
     if (tm.getToken("delivery_module").isEmpty())   tm.saveToken("delivery_module", "meshtastic_bootstrap_v1");
-    if (tm.getToken("meshtastic_gateway").isEmpty()) tm.saveToken("meshtastic_gateway", "meshtastic_bootstrap_v1");
+    if (tm.getToken("mesh_gateway").isEmpty()) tm.saveToken("mesh_gateway", "meshtastic_bootstrap_v1");
 
     if (!m_delivery)                  m_delivery = m_logosAPI->getClient("delivery_module");
     if (!m_deliveryObj && m_delivery) m_deliveryObj = m_delivery->requestObject("delivery_module");
@@ -487,7 +524,7 @@ void MeshtasticGatewayPlugin::initDelivery()
         if (++m_deliveryTries <= 60) {              // delivery_module can take a while to come up
             QTimer::singleShot(500, this, [this]() { initDelivery(); });
         } else {
-            qWarning() << "meshtastic_gateway: delivery_module not reachable — relay disabled";
+            qWarning() << "mesh_gateway: delivery_module not reachable — relay disabled";
             setDeliveryState("down");
         }
         return;
@@ -500,28 +537,28 @@ void MeshtasticGatewayPlugin::initDelivery()
     // Edge node on the logos.dev cluster, then subscribe the relaying channels' topics.
     setDeliveryState("connecting");
     const QString cfg = QStringLiteral("{\"mode\":\"Edge\",\"preset\":\"logos.dev\"}");
-    qInfo() << "meshtastic_gateway: delivery createNode…";
+    qInfo() << "mesh_gateway: delivery createNode…";
     m_delivery->invokeRemoteMethodAsync("delivery_module", "createNode", QVariant(cfg),
         [this](QVariant) {
-            qInfo() << "meshtastic_gateway: delivery start…";
+            qInfo() << "mesh_gateway: delivery start…";
             m_delivery->invokeRemoteMethodAsync("delivery_module", "start", QVariantList(),
                 [this](QVariant) {
                     m_deliveryReady = true;
                     setDeliveryState("ready");
-                    qInfo() << "meshtastic_gateway: delivery node ready";
+                    qInfo() << "mesh_gateway: delivery node ready";
                     subscribeRelayTopics();
                 });
         });
 }
 
-void MeshtasticGatewayPlugin::subscribeRelayTopics()
+void MeshGatewayPlugin::subscribeRelayTopics()
 {
     if (!m_deliveryReady || !m_delivery) return;
     for (const auto& v : m_channels) {
         const QJsonObject c = v.toObject();
         if (!c["relaying"].toBool()) continue;
         const QString topic = c["topic"].toString();
-        qInfo() << "meshtastic_gateway: subscribe" << topic;
+        qInfo() << "mesh_gateway: subscribe" << topic;
         LogosAPIClient* d = m_delivery;
         QTimer::singleShot(0, this, [d, topic]() {
             d->invokeRemoteMethodAsync("delivery_module", "subscribe",
@@ -588,7 +625,7 @@ static bool aesGcmDecrypt(const QByteArray& key, const QByteArray& blob, QByteAr
     return true;
 }
 
-QByteArray MeshtasticGatewayPlugin::channelKey(int channelIndex) const
+QByteArray MeshGatewayPlugin::channelKey(int channelIndex) const
 {
     QByteArray psk;
     for (const auto& v : m_channels) {
@@ -600,14 +637,14 @@ QByteArray MeshtasticGatewayPlugin::channelKey(int channelIndex) const
     }
     if (psk.isEmpty()) return QByteArray();     // unencrypted channel -> no LM encryption
     // Deterministic, domain-separated: every member shares name+psk, so all derive the same 32-byte key.
-    const QByteArray seed = QByteArray("meshtastic-gateway/lm-relay/v1\n") + psk;
+    const QByteArray seed = QByteArray("mesh-gateway/lm-relay/v1\n") + psk;
     return QCryptographicHash::hash(seed, QCryptographicHash::Sha256);
 }
 
-void MeshtasticGatewayPlugin::publishToLM(int channelIndex, const QString& text)
+void MeshGatewayPlugin::publishToLM(int channelIndex, const QString& text)
 {
     if (!m_deliveryReady || !m_delivery) {
-        qWarning() << "meshtastic_gateway: delivery not ready — dropping publish on ch" << channelIndex;
+        qWarning() << "mesh_gateway: delivery not ready — dropping publish on ch" << channelIndex;
         return;
     }
     const QString topic = topicFor(channelIndex);
@@ -618,7 +655,7 @@ void MeshtasticGatewayPlugin::publishToLM(int channelIndex, const QString& text)
     const QByteArray key = channelKey(channelIndex);
     if (!key.isEmpty()) {
         const QByteArray blob = aesGcmEncrypt(key, text.toUtf8());
-        if (blob.isEmpty()) { qWarning() << "meshtastic_gateway: LM encrypt failed ch" << channelIndex; return; }
+        if (blob.isEmpty()) { qWarning() << "mesh_gateway: LM encrypt failed ch" << channelIndex; return; }
         payload = QStringLiteral("ENC1:") + QString::fromLatin1(blob.toBase64());
     }
 
@@ -631,7 +668,7 @@ void MeshtasticGatewayPlugin::publishToLM(int channelIndex, const QString& text)
     });
 }
 
-int MeshtasticGatewayPlugin::channelForTopic(const QString& topic) const
+int MeshGatewayPlugin::channelForTopic(const QString& topic) const
 {
     for (const auto& v : m_channels) {
         const QJsonObject c = v.toObject();
@@ -641,7 +678,7 @@ int MeshtasticGatewayPlugin::channelForTopic(const QString& topic) const
 }
 
 // Inbound from Logos Messaging. data = [messageHash, contentTopic, payloadBase64, timestamp].
-void MeshtasticGatewayPlugin::onDeliveryMessage(const QVariantList& data)
+void MeshGatewayPlugin::onDeliveryMessage(const QVariantList& data)
 {
     if (data.size() < 3) return;
     const QString topic = data[1].toString();
@@ -656,7 +693,7 @@ void MeshtasticGatewayPlugin::onDeliveryMessage(const QVariantList& data)
         QByteArray plain;
         const QByteArray key = channelKey(ch);
         if (key.isEmpty() || !aesGcmDecrypt(key, blob, plain)) {
-            qWarning() << "meshtastic_gateway: LM decrypt failed ch" << ch << "— dropping";
+            qWarning() << "mesh_gateway: LM decrypt failed ch" << ch << "— dropping";
             return;                             // wrong key / tampered — don't inject garbage to mesh
         }
         text = QString::fromUtf8(plain);
@@ -666,7 +703,7 @@ void MeshtasticGatewayPlugin::onDeliveryMessage(const QVariantList& data)
 
     const QString fp = fingerprint(ch, text);
     if (m_seen.contains(fp)) {                  // our own publish echoing back — suppress (Flow A/C)
-        qInfo() << "meshtastic_gateway: dedup — suppressing own LM echo on ch" << ch;
+        qInfo() << "mesh_gateway: dedup — suppressing own LM echo on ch" << ch;
         return;
     }
     m_seen.insert(fp);
@@ -687,7 +724,7 @@ void MeshtasticGatewayPlugin::onDeliveryMessage(const QVariantList& data)
     persistMessage(ch, o);
     emitMessages(ch);
 
-    qInfo() << "meshtastic_gateway: relay LM->mesh ch" << ch << ":" << text;
+    qInfo() << "mesh_gateway: relay LM->mesh ch" << ch << ":" << text;
     sendToMesh(ch, text);   // inject onto the LoRa channel (fingerprint already in `seen`)
 }
 
@@ -709,7 +746,7 @@ static QByteArray frameToRadio(const std::string& buf)
     return f;
 }
 
-void MeshtasticGatewayPlugin::openSerial()
+void MeshGatewayPlugin::openSerial()
 {
     if (m_serial && m_serial->isOpen()) return;
 
@@ -728,7 +765,7 @@ void MeshtasticGatewayPlugin::openSerial()
     }
     if (port.isEmpty()) {
         if (m_serialTries++ % 6 == 0)
-            qInfo() << "meshtastic_gateway: no Meshtastic serial device found — waiting";
+            qInfo() << "mesh_gateway: no Meshtastic serial device found — waiting";
         m_nodePresent = false;
         m_linkState = "searching";
         emitStatus();
@@ -741,7 +778,7 @@ void MeshtasticGatewayPlugin::openSerial()
         connect(m_serial, &QSerialPort::readyRead, this, [this]() { onSerialReadyRead(); });
         connect(m_serial, &QSerialPort::errorOccurred, this, [this](QSerialPort::SerialPortError e) {
             if (e == QSerialPort::ResourceError || e == QSerialPort::PermissionError) {
-                qWarning() << "meshtastic_gateway: serial error" << e << "— reconnecting";
+                qWarning() << "mesh_gateway: serial error" << e << "— reconnecting";
                 if (m_serial->isOpen()) m_serial->close();
                 m_nodePresent = false;
                 // PermissionError = device locked by another app, or our user lacks serial access.
@@ -754,14 +791,14 @@ void MeshtasticGatewayPlugin::openSerial()
     m_serial->setPortName(port);
     m_serial->setBaudRate(QSerialPort::Baud115200);
     if (!m_serial->open(QIODevice::ReadWrite)) {
-        qWarning() << "meshtastic_gateway: cannot open" << port << "—" << m_serial->errorString();
+        qWarning() << "mesh_gateway: cannot open" << port << "—" << m_serial->errorString();
         m_nodePresent = false;
         m_linkState = (m_serial->error() == QSerialPort::PermissionError) ? "noperm" : "searching";
         emitStatus();
         QTimer::singleShot(3000, this, [this]() { openSerial(); });
         return;
     }
-    qInfo() << "meshtastic_gateway: serial open on" << port << "— requesting config";
+    qInfo() << "mesh_gateway: serial open on" << port << "— requesting config";
     m_configComplete = false;
     m_wantConfigTries = 0;
     m_linkState = "connecting";   // serial up, waiting for the config burst (UI shows blinking dot)
@@ -773,7 +810,7 @@ void MeshtasticGatewayPlugin::openSerial()
 // config_complete_id echoing our nonce). Opening the USB-CDC port can reset an ESP32-S3, so the
 // first request after open is frequently lost while the device re-enumerates — we resend (bounded)
 // until config_complete arrives, otherwise the gateway would sit with no channels forever.
-void MeshtasticGatewayPlugin::sendWantConfig()
+void MeshGatewayPlugin::sendWantConfig()
 {
     if (!m_serial || !m_serial->isOpen() || m_configComplete) return;
 
@@ -794,17 +831,17 @@ void MeshtasticGatewayPlugin::sendWantConfig()
     if (++m_wantConfigTries <= 5) {
         QTimer::singleShot(3000, this, [this]() {
             if (!m_configComplete) {
-                qInfo() << "meshtastic_gateway: no config yet — resending want_config (try"
+                qInfo() << "mesh_gateway: no config yet — resending want_config (try"
                         << m_wantConfigTries << ")";
                 sendWantConfig();
             }
         });
     } else {
-        qWarning() << "meshtastic_gateway: radio not responding to want_config after retries";
+        qWarning() << "mesh_gateway: radio not responding to want_config after retries";
     }
 }
 
-void MeshtasticGatewayPlugin::onSerialReadyRead()
+void MeshGatewayPlugin::onSerialReadyRead()
 {
     m_rxBuf += m_serial->readAll();
     while (true) {
@@ -826,7 +863,7 @@ void MeshtasticGatewayPlugin::onSerialReadyRead()
     }
 }
 
-void MeshtasticGatewayPlugin::handleFromRadio(const QByteArray& payload)
+void MeshGatewayPlugin::handleFromRadio(const QByteArray& payload)
 {
     meshtastic::FromRadio fr;
     if (!fr.ParseFromArray(payload.constData(), payload.size())) return;
@@ -912,7 +949,7 @@ void MeshtasticGatewayPlugin::handleFromRadio(const QByteArray& payload)
         if (fr.config().has_lora()) {
             m_modemPreset = QString::fromStdString(
                 meshtastic::Config_LoRaConfig_ModemPreset_Name(fr.config().lora().modem_preset()));
-            qInfo() << "meshtastic_gateway: modem preset" << m_modemPreset;
+            qInfo() << "mesh_gateway: modem preset" << m_modemPreset;
         }
         break;
     default:
@@ -920,7 +957,7 @@ void MeshtasticGatewayPlugin::handleFromRadio(const QByteArray& payload)
     }
 }
 
-void MeshtasticGatewayPlugin::finalizeConfig()
+void MeshGatewayPlugin::finalizeConfig()
 {
     m_configComplete = true;        // stops the want_config resend loop
     m_nodePresent = true;
@@ -928,14 +965,14 @@ void MeshtasticGatewayPlugin::finalizeConfig()
     if (!m_pendingNodeName.isEmpty()) m_nodeName = m_pendingNodeName;
     m_nodesTotal = m_cfgNodesTotal;
     m_nodesOnline = m_cfgNodesOnline;
-    qInfo() << "meshtastic_gateway: radio config complete —" << m_cfgChannels.size()
+    qInfo() << "mesh_gateway: radio config complete —" << m_cfgChannels.size()
             << "channels," << m_nodesTotal << "nodes (" << m_nodesOnline << "online)";
     rebuildChannelsFromMesh(m_cfgChannels);     // emits channelsChanged + (re)subscribes LM topics
     emitStatus();
     emitNodes();
 }
 
-void MeshtasticGatewayPlugin::rebuildChannelsFromMesh(const QJsonArray& chans)
+void MeshGatewayPlugin::rebuildChannelsFromMesh(const QJsonArray& chans)
 {
     // Preserve gateway-side per-channel state (relay toggle + unread) across refreshes.
     QMap<int, bool> wasRelaying;
@@ -990,11 +1027,11 @@ void MeshtasticGatewayPlugin::rebuildChannelsFromMesh(const QJsonArray& chans)
 }
 
 // Inbound text heard on the LoRa mesh.
-void MeshtasticGatewayPlugin::onMeshMessage(int channelIndex, const QString& from, const QString& text)
+void MeshGatewayPlugin::onMeshMessage(int channelIndex, const QString& from, const QString& text)
 {
     const QString fp = fingerprint(channelIndex, text);
     if (m_seen.contains(fp)) {           // our own injection echoing off the mesh — suppress
-        qInfo() << "meshtastic_gateway: dedup — suppressing own mesh echo on ch" << channelIndex;
+        qInfo() << "mesh_gateway: dedup — suppressing own mesh echo on ch" << channelIndex;
         return;
     }
     QJsonObject o;
@@ -1014,10 +1051,11 @@ void MeshtasticGatewayPlugin::onMeshMessage(int channelIndex, const QString& fro
     maybeRelay(channelIndex, text, "mesh");   // bridge to LM if relaying (records fingerprint)
 }
 
-void MeshtasticGatewayPlugin::sendToMesh(int channelIndex, const QString& text)
+void MeshGatewayPlugin::sendToMesh(int channelIndex, const QString& text)
 {
+    if (m_useMeshCore) { if (m_mcRadio) m_mcRadio->sendToMesh(channelIndex, text); return; }
     if (!m_serial || !m_serial->isOpen()) {
-        qWarning() << "meshtastic_gateway: serial not open — mesh TX dropped on ch" << channelIndex;
+        qWarning() << "mesh_gateway: serial not open — mesh TX dropped on ch" << channelIndex;
         return;
     }
     meshtastic::ToRadio toRadio;
@@ -1035,7 +1073,7 @@ void MeshtasticGatewayPlugin::sendToMesh(int channelIndex, const QString& text)
 static void sendAdminMsg(QSerialPort* serial, quint32 myNum, const meshtastic::AdminMessage& admin)
 {
     if (!serial || !serial->isOpen()) {
-        qWarning() << "meshtastic_gateway: admin TX dropped — serial not open"; return;
+        qWarning() << "mesh_gateway: admin TX dropped — serial not open"; return;
     }
     meshtastic::ToRadio toRadio;
     meshtastic::MeshPacket* p = toRadio.mutable_packet();
@@ -1048,8 +1086,13 @@ static void sendAdminMsg(QSerialPort* serial, quint32 myNum, const meshtastic::A
 }
 
 // Write the node's owner name to the radio: AdminMessage{set_owner:User}.
-void MeshtasticGatewayPlugin::setOwner(const QString& longName, const QString& shortName)
+void MeshGatewayPlugin::setOwner(const QString& longName, const QString& shortName)
 {
+    if (m_useMeshCore) {
+        if (m_mcRadio) m_mcRadio->setOwner(longName, shortName);
+        emit eventResponse("ownerSaved", QVariantList() << longName.trimmed());
+        return;
+    }
     const QString ln = longName.trimmed();
     const QString sn = shortName.trimmed();
     if (ln.isEmpty()) return;
@@ -1060,7 +1103,7 @@ void MeshtasticGatewayPlugin::setOwner(const QString& longName, const QString& s
     u->set_long_name(ln.toStdString());
     u->set_short_name(sn.toStdString());
     sendAdminMsg(m_serial, m_myNum, admin);
-    qInfo() << "meshtastic_gateway: setOwner ->" << ln << "/" << sn;
+    qInfo() << "mesh_gateway: setOwner ->" << ln << "/" << sn;
 
     // Optimistic UI update; the radio also re-broadcasts NodeInfo with the new name shortly.
     m_nodeName = ln;
@@ -1073,11 +1116,39 @@ void MeshtasticGatewayPlugin::setOwner(const QString& longName, const QString& s
     }
     emitStatus();
     emitNodes();
+    emit eventResponse("ownerSaved", QVariantList() << ln);
+}
+
+// Apply a full mesh config — { "radio": {freqMHz,bwKHz,sf,cr,txDbm}, "channels": [{name, secret(hex)}] }.
+// One action to make the gateway join a mesh (e.g. DWeb Camp #dwebcamp). MeshCore backend for now.
+void MeshGatewayPlugin::loadConfig(const QString& json)
+{
+    const QJsonObject cfg      = QJsonDocument::fromJson(json.toUtf8()).object();
+    const QJsonObject radio    = cfg.value("radio").toObject();
+    const QJsonArray  channels = cfg.value("channels").toArray();
+
+    if (m_useMeshCore) {
+        if (m_mcRadio) {
+            const quint32 freqKhz = quint32(qRound(radio.value("freqMHz").toDouble() * 1000.0));   // MHz -> kHz
+            const quint32 bwHz    = quint32(qRound(radio.value("bwKHz").toDouble()  * 1000.0));    // kHz -> Hz
+            m_mcRadio->loadConfig(freqKhz, bwHz, radio.value("sf").toInt(),
+                                  radio.value("cr").toInt(), radio.value("txDbm").toInt(), channels);
+        }
+        qInfo() << "mesh_gateway: loadConfig — radio +" << channels.size() << "channels (meshcore)";
+        emit eventResponse("configLoaded", QVariantList() << channels.size());
+        return;
+    }
+    qWarning() << "mesh_gateway: loadConfig — only the MeshCore backend is supported currently";
+    emit eventResponse("configLoaded", QVariantList() << 0);
 }
 
 // Add a SECONDARY channel: AdminMessage{set_channel:Channel} at the lowest free slot (1..7).
-void MeshtasticGatewayPlugin::createChannel(const QString& name, const QString& pskB64)
+void MeshGatewayPlugin::createChannel(const QString& name, const QString& pskB64)
 {
+    if (m_useMeshCore) {
+        if (m_mcRadio) m_mcRadio->createChannel(name.trimmed(), QByteArray::fromBase64(pskB64.toUtf8()));
+        return;
+    }
     const QString nm = name.trimmed();
     if (nm.isEmpty()) return;
 
@@ -1085,7 +1156,7 @@ void MeshtasticGatewayPlugin::createChannel(const QString& name, const QString& 
     for (const auto& v : m_channels) used.insert(v.toObject()["channelIndex"].toInt());
     int idx = -1;
     for (int i = 1; i <= 7; ++i) if (!used.contains(i)) { idx = i; break; }
-    if (idx < 0) { qWarning() << "meshtastic_gateway: no free channel slot (1-7 full)"; return; }
+    if (idx < 0) { qWarning() << "mesh_gateway: no free channel slot (1-7 full)"; return; }
 
     QByteArray psk = QByteArray::fromBase64(pskB64.toUtf8());
     if (psk.isEmpty()) {                       // generate a fresh 16-byte key for a private channel
@@ -1101,7 +1172,7 @@ void MeshtasticGatewayPlugin::createChannel(const QString& name, const QString& 
     st->set_name(nm.toStdString());
     st->set_psk(psk.constData(), psk.size());
     sendAdminMsg(m_serial, m_myNum, admin);
-    qInfo() << "meshtastic_gateway: createChannel" << idx << nm;
+    qInfo() << "mesh_gateway: createChannel" << idx << nm;
 
     // optimistic add
     const QString b64 = QString::fromLatin1(psk.toBase64());
@@ -1122,8 +1193,9 @@ void MeshtasticGatewayPlugin::createChannel(const QString& name, const QString& 
 
 // Join an existing channel from a Meshtastic share link (https://meshtastic.org/e/#<base64url ChannelSet>):
 // decode the first ChannelSettings (name + psk) and add it like createChannel.
-void MeshtasticGatewayPlugin::addChannelFromUrl(const QString& url)
+void MeshGatewayPlugin::addChannelFromUrl(const QString& url)
 {
+    if (m_useMeshCore) { if (m_mcRadio) m_mcRadio->addChannelFromUrl(url); return; }
     QString frag = url.trimmed();
     const int hash = frag.indexOf('#');
     if (hash >= 0) frag = frag.mid(hash + 1);          // accept full URL or bare fragment
@@ -1133,7 +1205,7 @@ void MeshtasticGatewayPlugin::addChannelFromUrl(const QString& url)
     const QByteArray raw = QByteArray::fromBase64(frag.toLatin1(), QByteArray::Base64UrlEncoding);
     meshtastic::ChannelSet set;
     if (raw.isEmpty() || !set.ParseFromArray(raw.constData(), int(raw.size())) || set.settings_size() < 1) {
-        qWarning() << "meshtastic_gateway: addChannelFromUrl — not a valid channel link";
+        qWarning() << "mesh_gateway: addChannelFromUrl — not a valid channel link";
         return;
     }
     const meshtastic::ChannelSettings& s = set.settings(0);
@@ -1144,24 +1216,25 @@ void MeshtasticGatewayPlugin::addChannelFromUrl(const QString& url)
     const QString topic = deriveTopic(name, psk, 0);
     for (const auto& v : m_channels)
         if (v.toObject()["topic"].toString() == topic) {
-            qInfo() << "meshtastic_gateway: channel already present —" << name;
+            qInfo() << "mesh_gateway: channel already present —" << name;
             return;
         }
-    qInfo() << "meshtastic_gateway: addChannelFromUrl —" << name;
+    qInfo() << "mesh_gateway: addChannelFromUrl —" << name;
     createChannel(name, QString::fromLatin1(psk.toBase64()));
 }
 
 // Remove a channel: AdminMessage{set_channel:Channel{role=DISABLED}}. Never the primary (index 0).
-void MeshtasticGatewayPlugin::deleteChannel(int index)
+void MeshGatewayPlugin::deleteChannel(int index)
 {
-    if (index <= 0) { qWarning() << "meshtastic_gateway: refusing to delete channel" << index; return; }
+    if (m_useMeshCore) { if (m_mcRadio) m_mcRadio->deleteChannel(index); return; }
+    if (index <= 0) { qWarning() << "mesh_gateway: refusing to delete channel" << index; return; }
 
     meshtastic::AdminMessage admin;
     meshtastic::Channel* ch = admin.mutable_set_channel();
     ch->set_index(index);
     ch->set_role(meshtastic::Channel_Role_DISABLED);
     sendAdminMsg(m_serial, m_myNum, admin);
-    qInfo() << "meshtastic_gateway: deleteChannel" << index;
+    qInfo() << "mesh_gateway: deleteChannel" << index;
 
     // optimistic remove + unsubscribe its LM topic if it was relaying
     QJsonArray rebuilt;
@@ -1187,20 +1260,20 @@ void MeshtasticGatewayPlugin::deleteChannel(int index)
 
 // --- Chat ---------------------------------------------------------------
 
-int MeshtasticGatewayPlugin::monotonicTs()
+int MeshGatewayPlugin::monotonicTs()
 {
     // Monotonic ordering counter, persisted across restarts (resumed in openDb). Used only for
     // message ordering, not as a wall clock.
     return ++m_clock;
 }
 
-QString MeshtasticGatewayPlugin::getMessages(int channelIndex)
+QString MeshGatewayPlugin::getMessages(int channelIndex)
 {
     const QJsonArray arr = m_messages.value(channelIndex);
     return QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact));
 }
 
-void MeshtasticGatewayPlugin::sendMessage(int channelIndex, const QString& text)
+void MeshGatewayPlugin::sendMessage(int channelIndex, const QString& text)
 {
     const QString body = text.trimmed();
     if (body.isEmpty()) return;
@@ -1248,7 +1321,7 @@ void MeshtasticGatewayPlugin::sendMessage(int channelIndex, const QString& text)
     // fingerprint in `seen` and suppresses it (see "dedup — suppressing own LM echo" in the log).
 }
 
-void MeshtasticGatewayPlugin::setChannelUnread(int channelIndex, int unread)
+void MeshGatewayPlugin::setChannelUnread(int channelIndex, int unread)
 {
     for (int i = 0; i < m_channels.size(); ++i) {
         QJsonObject c = m_channels[i].toObject();
@@ -1262,12 +1335,12 @@ void MeshtasticGatewayPlugin::setChannelUnread(int channelIndex, int unread)
     }
 }
 
-void MeshtasticGatewayPlugin::markRead(int channelIndex)
+void MeshGatewayPlugin::markRead(int channelIndex)
 {
     setChannelUnread(channelIndex, 0);
 }
 
-void MeshtasticGatewayPlugin::addReaction(int channelIndex, int messageId, const QString& emoji)
+void MeshGatewayPlugin::addReaction(int channelIndex, int messageId, const QString& emoji)
 {
     if (emoji.isEmpty() || !m_messages.contains(channelIndex)) return;
     QJsonArray& arr = m_messages[channelIndex];

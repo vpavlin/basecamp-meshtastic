@@ -6,8 +6,8 @@
 # node name, joined channels) persist in the gateway's SQLite, so the daemon picks them up.
 #
 # IMPORTANT: the daemon and gwctl can't run at once (they share the serial port + DB).
-# Stop the service first:   systemctl --user stop meshtastic-gateway
-# …then re-start it after:  systemctl --user start meshtastic-gateway
+# Stop the service first:   systemctl --user stop mesh-gateway
+# …then re-start it after:  systemctl --user start mesh-gateway
 #
 # Usage:
 #   gwctl channels                 list channels (index, name, relaying)
@@ -20,8 +20,8 @@ set -euo pipefail
 
 LOGOSCORE="${LOGOSCORE:-$HOME/.local/bin/logoscore}"
 MODULES_DIR="${MODULES_DIR:-$HOME/.local/share/Logos/LogosBasecampDev/modules}"
-MODULES="${MODULES:-capability_module,delivery_module,meshtastic_gateway}"
-M=meshtastic_gateway
+MODULES="${MODULES:-capability_module,delivery_module,mesh_gateway}"
+M=mesh_gateway
 
 die() { echo "gwctl: $*" >&2; exit 1; }
 [[ -x "$LOGOSCORE" ]] || die "logoscore not found at '$LOGOSCORE' (set LOGOSCORE=...)"
@@ -29,7 +29,7 @@ die() { echo "gwctl: $*" >&2; exit 1; }
 # refuse to fight a running daemon for the port/DB (check BEFORE arming the cleanup trap, so we
 # never kill a real daemon). Match both host names: .logos_host-wra (x86) and .logos_host.elf (arm).
 if pgrep -f logos_host >/dev/null 2>&1; then
-  die "a logos host is already running — stop the daemon first: systemctl --user stop meshtastic-gateway"
+  die "a logos host is already running — stop the daemon first: systemctl --user stop mesh-gateway"
 fi
 # logoscore --quit-on-finish leaks its child host; reap our own on exit so the next call is clean
 trap 'pkill -9 -f logos_host 2>/dev/null || true' EXIT

@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// Meshtastic Gateway — desktop chat-style front-end for the meshtastic_gateway core module.
+// Mesh gateway — desktop chat front-end for the mesh_gateway core module (Meshtastic or MeshCore backend).
 // Left sidebar lists the connected node's channels (encryption badge, relay state, unread count);
 // right pane is the per-channel chat (sender names, delivery/ack status, emoji reactions, reply).
 // Self-contained styling: ui_qml runs sandboxed, so we reproduce the Logos palette here.
@@ -14,6 +14,7 @@ Item {
     property string linkState: "searching"     // searching | connecting | connected (LoRa node)
     property string deliveryState: "down"      // down | connecting | ready (Logos Messaging)
     property string nodeName: ""
+    property string protocol: ""               // active backend: "meshcore" | "meshtastic"
     property int relayingCount: 0
     property int nodesTotal: 0
     property int nodesOnline: 0
@@ -45,6 +46,20 @@ Item {
     // ── settings (persisted backend-side; see settingsChanged) ────
     property var settings: ({ onlineWindowSec: 7200, maxMsgsPerChannel: 0, distanceUnit: "km" })
     property bool settingsOpen: false
+    property bool ownerSaved: false      // transient "✓ Saved" flash in the settings modal
+    property string configMsg: ""        // transient "✓ Config loaded" flash
+    // One-tap DWeb Camp mesh config (radio preset + channels), from mesh.dod.ngo/config/
+    readonly property var dwebConfig: ({
+        radio: { freqMHz: 869.618, bwKHz: 62.5, sf: 8, cr: 8, txDbm: 22 },
+        channels: [
+            { name: "#dwebcamp",          secret: "b8769b859a18cb47fa326c79bc04e2da" },
+            { name: "#schedule",          secret: "03a5bab42c9d3535b69f259f338be9ea" },
+            { name: "#workshop",          secret: "3862ef52df5e5966eb10751b83788bc5" },
+            { name: "#bot",               secret: "eb50a1bcb3e4e5d7bf69a57c9dada211" },
+            { name: "#berlinmesh",        secret: "c5ead1d8a7647a63fd37d156cdc3e257" },
+            { name: "#berlinbrandenburg", secret: "625ff2a308bbe3a4c90da77979b7a4fc" }
+        ]
+    })
 
     readonly property var reactChoices: ["👍", "❤️", "😂", "🔥", "‼️"]
 
@@ -67,7 +82,7 @@ Item {
         if (typeof logos === "undefined" || !logos.callModule) return
         // Defer so a click handler / event handler returns before the IPC round-trip starts.
         Qt.callLater(function () {
-            try { logos.callModule("meshtastic_gateway", method, args || []) } catch (e) {}
+            try { logos.callModule("mesh_gateway", method, args || []) } catch (e) {}
         })
     }
 
@@ -79,6 +94,7 @@ Item {
             root.linkState = st.linkState || (st.nodePresent ? "connected" : "searching")
             root.deliveryState = st.deliveryState || "down"
             root.nodeName = st.nodeName || ""
+            root.protocol = st.protocol || ""
             root.nodesTotal = st.nodesTotal || 0
             root.nodesOnline = st.nodesOnline || 0
         } catch (e) { /* ignore malformed */ }
@@ -307,15 +323,19 @@ Item {
     // No polling Timer, no synchronous data pulls — everything below renders from events.
     Component.onCompleted: {
         if (typeof logos !== "undefined" && logos.onModuleEvent) {
-            logos.onModuleEvent("meshtastic_gateway", "nodeStatus")
-            logos.onModuleEvent("meshtastic_gateway", "channelsChanged")
-            logos.onModuleEvent("meshtastic_gateway", "messagesChanged")
-            logos.onModuleEvent("meshtastic_gateway", "nodesChanged")
-            logos.onModuleEvent("meshtastic_gateway", "settingsChanged")
+            logos.onModuleEvent("mesh_gateway", "nodeStatus")
+            logos.onModuleEvent("mesh_gateway", "channelsChanged")
+            logos.onModuleEvent("mesh_gateway", "messagesChanged")
+            logos.onModuleEvent("mesh_gateway", "nodesChanged")
+            logos.onModuleEvent("mesh_gateway", "settingsChanged")
+            logos.onModuleEvent("mesh_gateway", "ownerSaved")
+            logos.onModuleEvent("mesh_gateway", "configLoaded")
         }
         gw("requestSnapshot")
     }
     Timer { id: statusTimer; interval: 2600; onTriggered: root.statusMsg = "" }
+    Timer { id: ownerSavedTimer; interval: 2600; onTriggered: root.ownerSaved = false }
+    Timer { id: configMsgTimer; interval: 3500; onTriggered: root.configMsg = "" }
     Connections {
         target: typeof logos !== "undefined" ? logos : null
         ignoreUnknownSignals: true
@@ -324,12 +344,14 @@ Item {
         //   channelsChanged -> d[0] = channels JSON
         //   messagesChanged -> d[0] = channelIndex, d[1] = that channel's messages JSON
         function onModuleEventReceived(m, e, d) {
-            if (m !== "meshtastic_gateway") return
+            if (m !== "mesh_gateway") return
             if (e === "nodeStatus")           root.applyStatus(d[0])
             else if (e === "channelsChanged") root.applyChannels(d[0])
             else if (e === "messagesChanged") root.applyMessages(d[0], d[1])
             else if (e === "nodesChanged")    root.applyNodes(d[0])
             else if (e === "settingsChanged") root.applySettings(d[0])
+            else if (e === "ownerSaved")      { root.ownerSaved = true; ownerSavedTimer.restart() }
+            else if (e === "configLoaded")    { root.configMsg = "✓ Config loaded — " + (d[0] || 0) + " channels"; configMsgTimer.restart() }
         }
     }
 
@@ -381,8 +403,25 @@ Item {
                             }
                         }
                         Text {
-                            text: "Meshtastic"; color: root.t.text
+                            text: "Mesh"; color: root.t.text
                             font.pixelSize: root.t.fTitle; font.weight: Font.DemiBold
+                        }
+                        // active-backend badge — which implementation is driving this gateway
+                        Rectangle {
+                            visible: root.protocol !== ""
+                            radius: 4
+                            color: root.protocol === "meshcore" ? root.t.primary : root.t.bg
+                            border.width: 1
+                            border.color: root.protocol === "meshcore" ? root.t.primary : root.t.border
+                            implicitWidth: protoLabel.implicitWidth + 12
+                            implicitHeight: protoLabel.implicitHeight + 6
+                            Text {
+                                id: protoLabel; anchors.centerIn: parent
+                                text: root.protocol === "meshcore" ? "MeshCore"
+                                    : root.protocol === "meshtastic" ? "Meshtastic" : root.protocol
+                                color: root.protocol === "meshcore" ? root.t.onPrimary : root.t.textSec
+                                font.pixelSize: root.t.fSmall; font.weight: Font.DemiBold
+                            }
                         }
                         Item { Layout.fillWidth: true }
                         // settings gear
@@ -624,7 +663,7 @@ Item {
                             visible: channels.count === 0
                             width: parent.width - 20; horizontalAlignment: Text.AlignHCenter
                             wrapMode: Text.Wrap
-                            text: "No channels — connect a Meshtastic node"
+                            text: "No channels — connect a mesh node"
                             color: root.t.textMuted; font.pixelSize: root.t.fSmall
                         }
                     }
@@ -739,7 +778,7 @@ Item {
                         text: root.linkState === "noperm"
                                 ? "Can't open the serial device.\nClose any other app using the node (or a second Basecamp), or grant your user serial access:\nsudo usermod -aG dialout $USER   — then log out and back in."
                             : root.nodePresent ? "Select a channel to start chatting"
-                                               : "Waiting for a Meshtastic node…"
+                                               : "Waiting for a mesh node…"
                         color: root.linkState === "noperm" ? root.t.warn : root.t.textSec
                         font.pixelSize: root.t.fBody
                     }
@@ -1419,8 +1458,59 @@ Item {
                     }
                     Text {
                         Layout.fillWidth: true; wrapMode: Text.Wrap
-                        text: "Short name is up to 4 characters, shown as your tag on other nodes."
-                        color: root.t.textMuted; font.pixelSize: 10
+                        text: root.ownerSaved ? "✓ Saved — name written to the radio"
+                                              : "Short name is up to 4 characters, shown as your tag on other nodes."
+                        color: root.ownerSaved ? "#3fb950" : root.t.textMuted
+                        font.pixelSize: 10; font.weight: root.ownerSaved ? Font.DemiBold : Font.Normal
+                    }
+                }
+
+                Rectangle { Layout.fillWidth: true; height: 1; color: root.t.border }
+
+                // ── load a mesh config (radio preset + channels) in one tap ──
+                ColumnLayout {
+                    Layout.fillWidth: true; spacing: root.t.sm
+                    Text { text: "Load mesh config"; color: root.t.textSec; font.pixelSize: root.t.fSmall }
+                    Rectangle {
+                        Layout.fillWidth: true; Layout.preferredHeight: 40; radius: root.t.radius
+                        color: root.t.primary
+                        Text { anchors.centerIn: parent; text: "Load DWeb Camp config"; color: root.t.onPrimary
+                               font.pixelSize: root.t.fBody; font.weight: Font.DemiBold }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            onClicked: root.gw("loadConfig", [JSON.stringify(root.dwebConfig)]) }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true; spacing: root.t.sm
+                        Rectangle {
+                            Layout.fillWidth: true; Layout.preferredHeight: 36; radius: root.t.radius
+                            color: root.t.bg; border.width: 1
+                            border.color: cfgPaste.activeFocus ? root.t.primary : root.t.border
+                            TextField {
+                                id: cfgPaste; anchors.fill: parent
+                                anchors.leftMargin: root.t.sm; anchors.rightMargin: root.t.sm
+                                verticalAlignment: TextInput.AlignVCenter
+                                color: root.t.text; font.pixelSize: root.t.fSmall
+                                placeholderText: "…or paste a config JSON"; placeholderTextColor: root.t.textMuted
+                                background: Item {}
+                            }
+                        }
+                        Rectangle {
+                            Layout.preferredWidth: 64; Layout.preferredHeight: 36; radius: root.t.radius
+                            property bool ok: cfgPaste.text && cfgPaste.text.trim().length > 0
+                            color: ok ? root.t.primary : root.t.border
+                            Text { anchors.centerIn: parent; text: "Load"
+                                   color: parent.ok ? root.t.onPrimary : root.t.textMuted
+                                   font.pixelSize: root.t.fSmall; font.weight: Font.DemiBold }
+                            MouseArea { anchors.fill: parent; enabled: parent.ok; cursorShape: Qt.PointingHandCursor
+                                onClicked: { root.gw("loadConfig", [cfgPaste.text.trim()]); cfgPaste.text = "" } }
+                        }
+                    }
+                    Text {
+                        Layout.fillWidth: true; wrapMode: Text.Wrap
+                        text: root.configMsg !== "" ? root.configMsg
+                            : "Retunes the radio + adds the channels (e.g. DWeb Camp #dwebcamp @ 869.618 MHz)."
+                        color: root.configMsg !== "" ? "#3fb950" : root.t.textMuted
+                        font.pixelSize: 10; font.weight: root.configMsg !== "" ? Font.DemiBold : Font.Normal
                     }
                 }
 

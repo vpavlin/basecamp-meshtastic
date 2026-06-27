@@ -7,8 +7,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 # Paths are resolved by the wrapper; override defaults in this file if your layout differs.
-EnvironmentFile=-%h/.config/meshtastic-gateway.env
-ExecStart=%h/.local/bin/meshtastic-gateway-run
+EnvironmentFile=-%h/.config/mesh-gateway.env
+ExecStart=%h/.local/bin/mesh-gateway-run
 # logoscore on some (older/ARM) builds self-exits after ~90 s; always bring it back.
 Restart=always
 RestartSec=5

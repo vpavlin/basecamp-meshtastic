@@ -1,5 +1,5 @@
 {
-  description = "Meshtastic Gateway UI — choose which Meshtastic channels to bridge to Logos Messaging";
+  description = "Mesh gateway UI — choose which mesh channels to bridge to Logos Messaging";
 
   inputs = {
     # Same pinned rev as gateway/flake.nix (ABI-compatible with the current logos_host).
