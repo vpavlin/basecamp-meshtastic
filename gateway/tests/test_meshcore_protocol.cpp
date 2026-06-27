@@ -152,6 +152,10 @@ int main() {
         check(cmdSendSelfAdvert(false) == (Bytes{0x07, 0x00}), "cmdSendSelfAdvert zero-hop");
         check(cmdSetAdvertName("VP2-pi") == (Bytes{0x08,'V','P','2','-','p','i'}), "cmdSetAdvertName");
         check(cmdSetDeviceTime(0x01020304) == (Bytes{0x06, 0x04,0x03,0x02,0x01}), "cmdSetDeviceTime (LE)");
+        // DWeb preset: 869.618 MHz (freqKhz 869618), 62.5 kHz (bwHz 62500), SF8, CR4/8
+        check(cmdSetRadioParams(869618, 62500, 8, 8) ==
+              (Bytes{0x0B, 0xF2,0x44,0x0D,0x00, 0x24,0xF4,0x00,0x00, 8, 8, 0}), "cmdSetRadioParams (DWeb)");
+        check(cmdSetRadioTxPower(22) == (Bytes{0x0C, 22}), "cmdSetRadioTxPower");
     }
     // ---- parseContact (0x03, 148-byte entry) ----
     {

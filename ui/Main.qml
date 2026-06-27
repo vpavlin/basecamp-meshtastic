@@ -47,6 +47,19 @@ Item {
     property var settings: ({ onlineWindowSec: 7200, maxMsgsPerChannel: 0, distanceUnit: "km" })
     property bool settingsOpen: false
     property bool ownerSaved: false      // transient "✓ Saved" flash in the settings modal
+    property string configMsg: ""        // transient "✓ Config loaded" flash
+    // One-tap DWeb Camp mesh config (radio preset + channels), from mesh.dod.ngo/config/
+    readonly property var dwebConfig: ({
+        radio: { freqMHz: 869.618, bwKHz: 62.5, sf: 8, cr: 8, txDbm: 22 },
+        channels: [
+            { name: "#dwebcamp",          secret: "b8769b859a18cb47fa326c79bc04e2da" },
+            { name: "#schedule",          secret: "03a5bab42c9d3535b69f259f338be9ea" },
+            { name: "#workshop",          secret: "3862ef52df5e5966eb10751b83788bc5" },
+            { name: "#bot",               secret: "eb50a1bcb3e4e5d7bf69a57c9dada211" },
+            { name: "#berlinmesh",        secret: "c5ead1d8a7647a63fd37d156cdc3e257" },
+            { name: "#berlinbrandenburg", secret: "625ff2a308bbe3a4c90da77979b7a4fc" }
+        ]
+    })
 
     readonly property var reactChoices: ["👍", "❤️", "😂", "🔥", "‼️"]
 
@@ -316,11 +329,13 @@ Item {
             logos.onModuleEvent("mesh_gateway", "nodesChanged")
             logos.onModuleEvent("mesh_gateway", "settingsChanged")
             logos.onModuleEvent("mesh_gateway", "ownerSaved")
+            logos.onModuleEvent("mesh_gateway", "configLoaded")
         }
         gw("requestSnapshot")
     }
     Timer { id: statusTimer; interval: 2600; onTriggered: root.statusMsg = "" }
     Timer { id: ownerSavedTimer; interval: 2600; onTriggered: root.ownerSaved = false }
+    Timer { id: configMsgTimer; interval: 3500; onTriggered: root.configMsg = "" }
     Connections {
         target: typeof logos !== "undefined" ? logos : null
         ignoreUnknownSignals: true
@@ -336,6 +351,7 @@ Item {
             else if (e === "nodesChanged")    root.applyNodes(d[0])
             else if (e === "settingsChanged") root.applySettings(d[0])
             else if (e === "ownerSaved")      { root.ownerSaved = true; ownerSavedTimer.restart() }
+            else if (e === "configLoaded")    { root.configMsg = "✓ Config loaded — " + (d[0] || 0) + " channels"; configMsgTimer.restart() }
         }
     }
 
@@ -1446,6 +1462,55 @@ Item {
                                               : "Short name is up to 4 characters, shown as your tag on other nodes."
                         color: root.ownerSaved ? "#3fb950" : root.t.textMuted
                         font.pixelSize: 10; font.weight: root.ownerSaved ? Font.DemiBold : Font.Normal
+                    }
+                }
+
+                Rectangle { Layout.fillWidth: true; height: 1; color: root.t.border }
+
+                // ── load a mesh config (radio preset + channels) in one tap ──
+                ColumnLayout {
+                    Layout.fillWidth: true; spacing: root.t.sm
+                    Text { text: "Load mesh config"; color: root.t.textSec; font.pixelSize: root.t.fSmall }
+                    Rectangle {
+                        Layout.fillWidth: true; Layout.preferredHeight: 40; radius: root.t.radius
+                        color: root.t.primary
+                        Text { anchors.centerIn: parent; text: "Load DWeb Camp config"; color: root.t.onPrimary
+                               font.pixelSize: root.t.fBody; font.weight: Font.DemiBold }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            onClicked: root.gw("loadConfig", [JSON.stringify(root.dwebConfig)]) }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true; spacing: root.t.sm
+                        Rectangle {
+                            Layout.fillWidth: true; Layout.preferredHeight: 36; radius: root.t.radius
+                            color: root.t.bg; border.width: 1
+                            border.color: cfgPaste.activeFocus ? root.t.primary : root.t.border
+                            TextField {
+                                id: cfgPaste; anchors.fill: parent
+                                anchors.leftMargin: root.t.sm; anchors.rightMargin: root.t.sm
+                                verticalAlignment: TextInput.AlignVCenter
+                                color: root.t.text; font.pixelSize: root.t.fSmall
+                                placeholderText: "…or paste a config JSON"; placeholderTextColor: root.t.textMuted
+                                background: Item {}
+                            }
+                        }
+                        Rectangle {
+                            Layout.preferredWidth: 64; Layout.preferredHeight: 36; radius: root.t.radius
+                            property bool ok: cfgPaste.text && cfgPaste.text.trim().length > 0
+                            color: ok ? root.t.primary : root.t.border
+                            Text { anchors.centerIn: parent; text: "Load"
+                                   color: parent.ok ? root.t.onPrimary : root.t.textMuted
+                                   font.pixelSize: root.t.fSmall; font.weight: Font.DemiBold }
+                            MouseArea { anchors.fill: parent; enabled: parent.ok; cursorShape: Qt.PointingHandCursor
+                                onClicked: { root.gw("loadConfig", [cfgPaste.text.trim()]); cfgPaste.text = "" } }
+                        }
+                    }
+                    Text {
+                        Layout.fillWidth: true; wrapMode: Text.Wrap
+                        text: root.configMsg !== "" ? root.configMsg
+                            : "Retunes the radio + adds the channels (e.g. DWeb Camp #dwebcamp @ 869.618 MHz)."
+                        color: root.configMsg !== "" ? "#3fb950" : root.t.textMuted
+                        font.pixelSize: 10; font.weight: root.configMsg !== "" ? Font.DemiBold : Font.Normal
                     }
                 }
 

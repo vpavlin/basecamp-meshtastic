@@ -64,6 +64,7 @@ public:
     Q_INVOKABLE void createChannel(const QString& name, const QString& pskB64);     // add a secondary channel
     Q_INVOKABLE void addChannelFromUrl(const QString& url);                          // join via meshtastic.org/e/# link
     Q_INVOKABLE void deleteChannel(int index);                                      // disable a channel (not 0)
+    Q_INVOKABLE void loadConfig(const QString& json);                               // apply {radio,channels} in one shot
 
 signals:
     void eventResponse(const QString& eventName, const QVariantList& args);

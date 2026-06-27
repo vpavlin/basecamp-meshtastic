@@ -1119,6 +1119,29 @@ void MeshGatewayPlugin::setOwner(const QString& longName, const QString& shortNa
     emit eventResponse("ownerSaved", QVariantList() << ln);
 }
 
+// Apply a full mesh config — { "radio": {freqMHz,bwKHz,sf,cr,txDbm}, "channels": [{name, secret(hex)}] }.
+// One action to make the gateway join a mesh (e.g. DWeb Camp #dwebcamp). MeshCore backend for now.
+void MeshGatewayPlugin::loadConfig(const QString& json)
+{
+    const QJsonObject cfg      = QJsonDocument::fromJson(json.toUtf8()).object();
+    const QJsonObject radio    = cfg.value("radio").toObject();
+    const QJsonArray  channels = cfg.value("channels").toArray();
+
+    if (m_useMeshCore) {
+        if (m_mcRadio) {
+            const quint32 freqKhz = quint32(qRound(radio.value("freqMHz").toDouble() * 1000.0));   // MHz -> kHz
+            const quint32 bwHz    = quint32(qRound(radio.value("bwKHz").toDouble()  * 1000.0));    // kHz -> Hz
+            m_mcRadio->loadConfig(freqKhz, bwHz, radio.value("sf").toInt(),
+                                  radio.value("cr").toInt(), radio.value("txDbm").toInt(), channels);
+        }
+        qInfo() << "mesh_gateway: loadConfig — radio +" << channels.size() << "channels (meshcore)";
+        emit eventResponse("configLoaded", QVariantList() << channels.size());
+        return;
+    }
+    qWarning() << "mesh_gateway: loadConfig — only the MeshCore backend is supported currently";
+    emit eventResponse("configLoaded", QVariantList() << 0);
+}
+
 // Add a SECONDARY channel: AdminMessage{set_channel:Channel} at the lowest free slot (1..7).
 void MeshGatewayPlugin::createChannel(const QString& name, const QString& pskB64)
 {

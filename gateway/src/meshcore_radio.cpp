@@ -330,3 +330,40 @@ void MeshCoreRadio::deleteChannel(int channelIndex)
     qInfo() << "meshcore_radio: deleteChannel" << channelIndex;
     QTimer::singleShot(400, this, [this]() { m_chan.clear(); requestChannel(0); });
 }
+
+void MeshCoreRadio::loadConfig(quint32 freqKhz, quint32 bwHz, int sf, int cr, int txDbm, const QJsonArray& channels)
+{
+    if (!m_serial || !m_serial->isOpen()) { qWarning() << "meshcore_radio: loadConfig — serial not open"; return; }
+
+    // Build the frame list first, then send it PACED. The radio's command parser overruns on rapid
+    // back-to-back frames (bulk sends corrupted the later SET_CHANNELs), so we send one frame per ~250 ms
+    // (with a flush) and re-scan once at the end.
+    QVector<meshcore::Bytes> frames;
+    if (freqKhz > 0 && sf > 0) {
+        frames.push_back(meshcore::cmdSetRadioParams(freqKhz, bwHz, uint8_t(sf), uint8_t(cr)));
+        if (txDbm > 0) frames.push_back(meshcore::cmdSetRadioTxPower(uint8_t(txDbm)));
+        qInfo() << "meshcore_radio: loadConfig radio" << freqKhz << "kHz / bw" << bwHz << "Hz / sf" << sf << "cr" << cr << "tx" << txDbm;
+    }
+    int slot = 1;   // slot 0 (Public) is left intact; secondaries go in 1..N
+    for (const QJsonValue& v : channels) {
+        const QJsonObject c = v.toObject();
+        const QString name = c.value("name").toString().trimmed();
+        const QByteArray secret = QByteArray::fromHex(c.value("secret").toString().toLatin1());
+        if (name.isEmpty() || secret.size() != 16) {
+            qWarning() << "meshcore_radio: loadConfig — skipping bad channel" << name << "(secret bytes" << secret.size() << ")";
+            continue;
+        }
+        if (slot >= m_maxChannels) { qWarning() << "meshcore_radio: loadConfig — out of channel slots"; break; }
+        frames.push_back(meshcore::cmdSetChannel(uint8_t(slot), name.toStdString(), meshcore::Bytes(secret.begin(), secret.end())));
+        qInfo() << "meshcore_radio: loadConfig — channel" << slot << name;
+        ++slot;
+    }
+
+    const int step = 250;   // ms between frames — paced so the radio fully consumes each one
+    for (int i = 0; i < frames.size(); ++i) {
+        const meshcore::Bytes fr = frames[i];
+        QTimer::singleShot(i * step, this, [this, fr]() { sendFrame(fr); if (m_serial) m_serial->flush(); });
+    }
+    // Re-scan after the last frame has been sent + applied -> refresh channels + nodes in the UI.
+    QTimer::singleShot(frames.size() * step + 700, this, [this]() { m_chan.clear(); requestChannel(0); });
+}

@@ -29,6 +29,8 @@ enum Cmd : uint8_t {
     CMD_SEND_SELF_ADVERT = 0x07,
     CMD_SET_ADVERT_NAME  = 0x08,
     CMD_GET_MESSAGE      = 0x0A,
+    CMD_SET_RADIO_PARAMS = 0x0B,
+    CMD_SET_RADIO_TX_POWER = 0x0C,
     CMD_DEVICE_QUERY     = 0x16,
     CMD_GET_CHANNEL_INFO = 0x1F,
     CMD_SET_CHANNEL      = 0x20,
@@ -84,6 +86,8 @@ Bytes cmdGetContacts(uint32_t since = 0);          // since = last lastmod recei
 Bytes cmdSendSelfAdvert(bool flood = true);        // broadcast our advert so neighbours add us as a contact
 Bytes cmdSetAdvertName(const std::string& name);   // set our adv_name (rides along in future adverts)
 Bytes cmdSetDeviceTime(uint32_t epochSecs);        // set the radio RTC (so our adverts carry a fresh timestamp)
+Bytes cmdSetRadioParams(uint32_t freqKhz, uint32_t bwHz, uint8_t sf, uint8_t cr);  // freqKhz=MHz*1000, bwHz=kHz*1000
+Bytes cmdSetRadioTxPower(uint8_t dbm);
 
 // ---- parsed responses -----------------------------------------------------
 struct SelfInfo {

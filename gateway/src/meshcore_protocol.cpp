@@ -96,6 +96,21 @@ Bytes cmdSetDeviceTime(uint32_t epochSecs) {
     return f;
 }
 
+Bytes cmdSetRadioParams(uint32_t freqKhz, uint32_t bwHz, uint8_t sf, uint8_t cr) {
+    // radio_freq = freq(MHz)*1000 (i.e. kHz); radio_bw = bw(kHz)*1000 (i.e. Hz). Verified vs SELF_INFO read-back.
+    Bytes f{CMD_SET_RADIO_PARAMS};
+    putU32(f, freqKhz);
+    putU32(f, bwHz);
+    f.push_back(sf);
+    f.push_back(cr);
+    f.push_back(0);            // repeat_mode (off-grid) — ver9+; 0 = normal
+    return f;
+}
+
+Bytes cmdSetRadioTxPower(uint8_t dbm) {
+    return Bytes{CMD_SET_RADIO_TX_POWER, dbm};
+}
+
 Bytes cmdSetChannel(uint8_t index, const std::string& name, const Bytes& secret16) {
     Bytes f;
     f.push_back(CMD_SET_CHANNEL);
@@ -114,8 +129,8 @@ std::optional<SelfInfo> parseSelfInfo(const Bytes& f) {
     s.publicKey.assign(f.begin() + 4, f.begin() + 36);
     s.lat = getI32(f, 36) / 1e6;
     s.lon = getI32(f, 40) / 1e6;
-    s.freqKhz = uint32_t(getI32(f, 48) / 1000);
-    s.bwKhz   = uint32_t(getI32(f, 52) / 1000);
+    s.freqKhz = uint32_t(getI32(f, 48));            // field is already kHz (freq_MHz*1000)
+    s.bwKhz   = uint32_t(getI32(f, 52) / 1000);     // field is Hz (bw_kHz*1000) -> kHz
     s.sf = f[56];
     s.cr = f[57];
     s.name = trimNul(f, 58, f.size() - 58);

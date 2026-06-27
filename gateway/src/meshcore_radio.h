@@ -31,6 +31,9 @@ public:
     void createChannel(const QString& name, const QByteArray& key) override;
     void addChannelFromUrl(const QString& url) override;
     void deleteChannel(int channelIndex) override;
+    // Apply a full mesh config in one shot: retune the radio + set channels 1..N (slot 0/Public kept),
+    // then a single re-scan. freqKhz = MHz*1000, bwHz = kHz*1000; channels = [{name, secret(hex)}].
+    void loadConfig(quint32 freqKhz, quint32 bwHz, int sf, int cr, int txDbm, const QJsonArray& channels);
 
 private:
     void openSerial();
