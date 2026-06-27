@@ -140,13 +140,25 @@ void MeshCoreRadio::handleFrame(const Bytes& f)
     case meshcore::RESP_CHANNEL_MSG:
     case meshcore::RESP_CHANNEL_MSG_V3:
         if (auto m = meshcore::parseTextMessage(f); m && m->isChannel) {
-            emit meshMessage(m->channelIndex, QString(), QString::fromStdString(m->text));
+            const QString text = QString::fromStdString(m->text);
+            const int sep = text.indexOf(QStringLiteral(": "));   // "<sender>: <body>" -> mark sender heard
+            if (sep > 0) {
+                const QString sender = text.left(sep);
+                for (const meshcore::Contact& c : m_contacts)
+                    if (QString::fromStdString(c.name) == sender) { noteHeard(toQB(c.publicKey)); break; }
+            }
+            emit meshMessage(m->channelIndex, QString(), text);
             drainNext();                   // pull the next queued message, if any
         }
         break;
 
     case meshcore::RESP_CONTACT_MSG:
     case meshcore::RESP_CONTACT_MSG_V3:
+        if (auto m = meshcore::parseTextMessage(f); m && !m->isChannel && m->pubKeyPrefix.size() == 6) {
+            const QByteArray pre = toQB(m->pubKeyPrefix);
+            for (const meshcore::Contact& c : m_contacts)
+                if (toQB(c.publicKey).left(6) == pre) { noteHeard(toQB(c.publicKey)); break; }
+        }
         // Direct (contact) messages aren't channel traffic — log + drain, but don't relay.
         qInfo() << "meshcore_radio: contact (DM) message — not relayed";
         drainNext();
@@ -164,6 +176,7 @@ void MeshCoreRadio::handleFrame(const Bytes& f)
 
     case meshcore::PUSH_ADVERT:
     case meshcore::PUSH_NEW_ADVERT:
+        if (f.size() >= 33) noteHeard(QByteArray(reinterpret_cast<const char*>(f.data() + 1), 32));  // 32-byte pubkey
         qInfo() << "meshcore_radio: advert received — refreshing contacts";
         requestContacts();                 // a node announced itself -> re-pull contacts
         break;
@@ -251,16 +264,24 @@ void MeshCoreRadio::buildAndEmitNodes()
         o["isSelf"]    = false;
         o["name"]      = nm;
         o["longName"]  = nm;
-        o["lastHeard"] = double(c.lastAdvert);
+        const qint64 heard = qMax(qint64(c.lastAdvert), m_lastHeard.value(pk, 0));   // advert OR any traffic
+        o["lastHeard"] = double(heard);
         o["hasPos"]    = (c.lat != 0 || c.lon != 0);
         o["lat"]       = c.lat; o["lon"] = c.lon;
         o["pubKey"]    = QString::fromLatin1(pk.toHex());
         o["role"]      = QStringLiteral("CONTACT");
         nodes.append(o);
-        if (c.lastAdvert > 0 && (now - qint64(c.lastAdvert)) < 7200) ++online;
+        if (heard > 0 && (now - heard) < 7200) ++online;
     }
     qInfo() << "meshcore_radio: nodes —" << nodes.size() << "(" << m_contacts.size() << "contacts)";
     emit nodesDiscovered(nodes, nodes.size(), online);
+}
+
+void MeshCoreRadio::noteHeard(const QByteArray& pubKey)
+{
+    if (pubKey.isEmpty()) return;
+    m_lastHeard[pubKey] = QDateTime::currentSecsSinceEpoch();   // we heard this node now (advert OR message)
+    if (m_discovered) buildAndEmitNodes();                       // refresh online immediately
 }
 
 void MeshCoreRadio::drainNext()

@@ -45,6 +45,7 @@ private:
     void drainNext();                                // GET_MESSAGE (pull one queued message)
     void requestContacts();                          // GET_CONTACTS (refresh the contact list)
     void buildAndEmitNodes();                        // self + contacts -> nodesDiscovered
+    void noteHeard(const QByteArray& pubKey);        // stamp local "last heard" (any traffic) -> online
 
     QSerialPort* m_serial = nullptr;
     meshcore::FrameReader m_reader;
@@ -55,6 +56,7 @@ private:
     double m_selfLat = 0, m_selfLon = 0;             // local node position (0 = unknown)
     QMap<int, meshcore::ChannelInfo> m_chan;         // discovered channels by index
     QVector<meshcore::Contact> m_contacts;           // MeshCore contacts (the "nodes"), rebuilt per GET_CONTACTS
+    QMap<QByteArray, qint64> m_lastHeard;            // pubkey -> local epoch secs we last heard anything from it
     int m_scanIdx = -1;                              // current GET_CHANNEL_INFO index, -1 = not scanning
     int m_maxChannels = 8;
     bool m_handshaked = false;
