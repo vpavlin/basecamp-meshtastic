@@ -1,27 +1,27 @@
 {
   "schemaVersion": 1,
   "repositoryName": "basecamp-meshtastic",
-  "generatedAt": "2026-06-29T10:57:29Z",
+  "generatedAt": "2026-06-29T11:15:24Z",
   "packages": [
     {
       "name": "mesh_gateway",
       "versions": [
         {
-          "releasedAt": "2026-06-29T10:57:29Z",
-          "publisherRef": "mesh_gateway-v0.3.2",
-          "url": "https://github.com/vpavlin/basecamp-meshtastic/releases/download/v0.3.2/logos-mesh_gateway-module-lib-linux-amd64.lgx",
-          "size": 6399964,
-          "sha256": "4bd5c0e76ee57dc70770ccc6f69084a3d47ac8d014c3430194d73ce9cbc79820",
-          "rootHash": "932c560776dda073b2bd7957ae19b1d3dfaa74c7d83929c9cfb29c0e3c8d1f36",
+          "releasedAt": "2026-06-29T11:15:24Z",
+          "publisherRef": "mesh_gateway-v0.3.3",
+          "url": "https://github.com/vpavlin/basecamp-meshtastic/releases/download/v0.3.3/logos-mesh_gateway-module-lib-linux-amd64.lgx",
+          "size": 6399961,
+          "sha256": "a72ca753ddfdbe9f76d0a3cf514ff4d2b37f80658f975f2b4ea9f9fa72be912d",
+          "rootHash": "4166f289bc904790e06241086441438ee5c896091f99619848f3c3830df49e5c",
           "manifest": {
             "author": "",
             "category": "network",
             "dependencies": [],
             "description": "Mesh gateway \u2014 bridge a connected LoRa mesh node (Meshtastic or MeshCore) to/from Logos Messaging",
             "hashes": {
-              "root": "932c560776dda073b2bd7957ae19b1d3dfaa74c7d83929c9cfb29c0e3c8d1f36",
-              "variants": "a098ef2c86bc3f51a58f83c5cdaa7612816be84c609fe77a379a57abc979e34a",
-              "variants/linux-amd64": "037e4887b1b73daaa90ccf23f8d7c77c44aca170c3f03c1c06593b517657d4cd"
+              "root": "4166f289bc904790e06241086441438ee5c896091f99619848f3c3830df49e5c",
+              "variants": "a32b7a4d7fcbad3950ff08a7047748c76563aba80b219e252eb45f63351afc64",
+              "variants/linux-amd64": "f3d30aa1d3382db2b32be1810f5e7a953b8dee0f3046b14728a2681e01313f84"
             },
             "icon": "",
             "main": {
@@ -30,7 +30,7 @@
             "manifestVersion": "0.2.0",
             "name": "mesh_gateway",
             "type": "core",
-            "version": "0.1.0"
+            "version": "0.3.3"
           }
         }
       ]
@@ -39,12 +39,12 @@
       "name": "mesh_gateway_ui",
       "versions": [
         {
-          "releasedAt": "2026-06-29T10:57:29Z",
-          "publisherRef": "mesh_gateway_ui-v0.3.2",
-          "url": "https://github.com/vpavlin/basecamp-meshtastic/releases/download/v0.3.2/logos-mesh_gateway_ui-module-linux-amd64.lgx",
-          "size": 34205,
-          "sha256": "50b7f773f4c4c2a8be812fde95fa121de1b594750ede2c27b15ab980169dc535",
-          "rootHash": "2c9fa6869a5b59a8514a059e5078ddd181a2f10bddd19cdbcd8d473e57d7539b",
+          "releasedAt": "2026-06-29T11:15:24Z",
+          "publisherRef": "mesh_gateway_ui-v0.3.3",
+          "url": "https://github.com/vpavlin/basecamp-meshtastic/releases/download/v0.3.3/logos-mesh_gateway_ui-module-linux-amd64.lgx",
+          "size": 34204,
+          "sha256": "756d5123e835d66434cbc373ca0ee425865386a6b9540658c01ff0edd2a4c0de",
+          "rootHash": "a84620537bf68aa6492daefe6394b0c63e328957d6b044329617fc4724df75c1",
           "manifest": {
             "author": "",
             "category": "network",
@@ -54,16 +54,16 @@
             ],
             "description": "Mesh gateway UI \u2014 pick which of a connected node\u2019s channels to bridge to Logos Messaging",
             "hashes": {
-              "root": "2c9fa6869a5b59a8514a059e5078ddd181a2f10bddd19cdbcd8d473e57d7539b",
-              "variants": "a135d0269133bc576e33a2a4e42bba6a2e4bb9b1f24d40b8f50748b23927a379",
-              "variants/linux-amd64": "1a0b6f7106a0c8d0ac84292080bb46cb80e17e03852efb3310568d54128458dc"
+              "root": "a84620537bf68aa6492daefe6394b0c63e328957d6b044329617fc4724df75c1",
+              "variants": "6a2e047bfa0649e2a0e9e0cfce04062aed1dbef6b33b1154459cea5f2ce9674d",
+              "variants/linux-amd64": "d0f8a0f96f48877c1dfbf7e0ea9184180b79ccb0a6fa6a862d972f79351ed607"
             },
             "icon": "mesh.png",
             "main": {},
             "manifestVersion": "0.2.0",
             "name": "mesh_gateway_ui",
             "type": "ui_qml",
-            "version": "1.0.0",
+            "version": "0.3.3",
             "view": "Main.qml"
           }
         }
