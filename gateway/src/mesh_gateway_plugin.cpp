@@ -44,6 +44,10 @@ void MeshGatewayPlugin::initLogos(LogosAPI* api)
     // Defer delivery setup off the QRO reply thread (createNode/start are slow + async).
     QTimer::singleShot(0, this, [this]() { initDelivery(); });
 
+    // Liveness heartbeat: re-push status every 5s. If this host dies or hangs, the pulse stops
+    // and the UI flips the node indicator to "not responding" (client-side staleness detection).
+    { auto* hb = new QTimer(this); connect(hb, &QTimer::timeout, this, [this]() { emitStatus(); }); hb->start(5000); }
+
     // Mesh backend selection: Meshtastic (StreamAPI, inline below) is the default; MESH_PROTOCOL=meshcore
     // drives the MeshCore companion protocol via MeshCoreRadio. The LM relay / encryption / dedup / DB /
     // UI layer is protocol-agnostic, so a MeshCore backend plugs into the same rebuildChannelsFromMesh +
