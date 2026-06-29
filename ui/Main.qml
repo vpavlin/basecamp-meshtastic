@@ -18,6 +18,8 @@ Item {
     property int relayingCount: 0
     property int nodesTotal: 0
     property int nodesOnline: 0
+    property double lastStatusMs: 0            // wall-clock of last status pulse (heartbeat); 0 = none yet
+    property bool backendStale: false          // true when the gateway heartbeat has gone silent → backend lost
 
     // ── chat selection ────────────────────────────────────────────
     property int openChannel: -1            // selected channelIndex, -1 = none
@@ -97,6 +99,7 @@ Item {
             root.protocol = st.protocol || ""
             root.nodesTotal = st.nodesTotal || 0
             root.nodesOnline = st.nodesOnline || 0
+            root.lastStatusMs = Date.now(); root.backendStale = false   // heartbeat: backend is alive
         } catch (e) { /* ignore malformed */ }
     }
     function applyChannels(json) {
@@ -336,6 +339,9 @@ Item {
     Timer { id: statusTimer; interval: 2600; onTriggered: root.statusMsg = "" }
     Timer { id: ownerSavedTimer; interval: 2600; onTriggered: root.ownerSaved = false }
     Timer { id: configMsgTimer; interval: 3500; onTriggered: root.configMsg = "" }
+    // Heartbeat watchdog: the gateway pushes status every 5s; if none for >15s the backend is gone.
+    Timer { interval: 3000; running: true; repeat: true
+            onTriggered: root.backendStale = root.lastStatusMs > 0 && (Date.now() - root.lastStatusMs) > 15000 }
     Connections {
         target: typeof logos !== "undefined" ? logos : null
         ignoreUnknownSignals: true
@@ -456,7 +462,8 @@ Item {
                             id: linkDot
                             width: 8; height: 8; radius: 4
                             Layout.alignment: Qt.AlignVCenter
-                            color: root.linkState === "connected" ? root.t.success
+                            color: root.backendStale ? root.t.danger
+                                 : root.linkState === "connected" ? root.t.success
                                  : root.linkState === "connecting" ? root.t.warn
                                  : root.linkState === "noperm" ? root.t.danger : root.t.textMuted
                             // Blink while connecting (animate a helper prop, not a Canvas → cheap).
@@ -473,7 +480,8 @@ Item {
                             Layout.fillWidth: true
                             elide: Text.ElideRight
                             color: root.t.textSec; font.pixelSize: root.t.fSmall
-                            text: root.linkState === "connected" ? root.nodeName
+                            text: root.backendStale ? "⚠ Backend not responding"
+                                : root.linkState === "connected" ? root.nodeName
                                 : root.linkState === "connecting" ? "Connecting…"
                                 : root.linkState === "noperm" ? "Serial port busy / no access"
                                 : "No node connected"
