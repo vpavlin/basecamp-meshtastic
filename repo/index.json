@@ -1,27 +1,27 @@
 {
   "schemaVersion": 1,
   "repositoryName": "basecamp-meshtastic",
-  "generatedAt": "2026-06-29T11:15:24Z",
+  "generatedAt": "2026-06-29T11:51:14Z",
   "packages": [
     {
       "name": "mesh_gateway",
       "versions": [
         {
-          "releasedAt": "2026-06-29T11:15:24Z",
-          "publisherRef": "mesh_gateway-v0.3.3",
-          "url": "https://github.com/vpavlin/basecamp-meshtastic/releases/download/v0.3.3/logos-mesh_gateway-module-lib-linux-amd64.lgx",
-          "size": 6399961,
-          "sha256": "a72ca753ddfdbe9f76d0a3cf514ff4d2b37f80658f975f2b4ea9f9fa72be912d",
-          "rootHash": "4166f289bc904790e06241086441438ee5c896091f99619848f3c3830df49e5c",
+          "releasedAt": "2026-06-29T11:51:14Z",
+          "publisherRef": "mesh_gateway-v0.3.4",
+          "url": "https://github.com/vpavlin/basecamp-meshtastic/releases/download/v0.3.4/logos-mesh_gateway-module-lib-linux-amd64.lgx",
+          "size": 6399955,
+          "sha256": "2933c5c599198e298609dda352842034d238d9387dc627e9117e694b9c7aa5eb",
+          "rootHash": "24d5ca6bad147d7b76f3ddf55829840441e03aef41e139941e456f526d99bbb0",
           "manifest": {
             "author": "",
             "category": "network",
             "dependencies": [],
             "description": "Mesh gateway \u2014 bridge a connected LoRa mesh node (Meshtastic or MeshCore) to/from Logos Messaging",
             "hashes": {
-              "root": "4166f289bc904790e06241086441438ee5c896091f99619848f3c3830df49e5c",
-              "variants": "a32b7a4d7fcbad3950ff08a7047748c76563aba80b219e252eb45f63351afc64",
-              "variants/linux-amd64": "f3d30aa1d3382db2b32be1810f5e7a953b8dee0f3046b14728a2681e01313f84"
+              "root": "24d5ca6bad147d7b76f3ddf55829840441e03aef41e139941e456f526d99bbb0",
+              "variants": "3e3aade5686aff2bdfa68dd991c4744a50bd0a6d7ad5a379b9aa84d99009d702",
+              "variants/linux-amd64": "b0a55f655fae7d0a606662ea6f05e25d1636e7057ad2320e7659f5dc490fa20e"
             },
             "icon": "",
             "main": {
@@ -30,7 +30,7 @@
             "manifestVersion": "0.2.0",
             "name": "mesh_gateway",
             "type": "core",
-            "version": "0.3.3"
+            "version": "0.3.4"
           }
         }
       ]
@@ -39,32 +39,63 @@
       "name": "mesh_gateway_ui",
       "versions": [
         {
-          "releasedAt": "2026-06-29T11:15:24Z",
-          "publisherRef": "mesh_gateway_ui-v0.3.3",
-          "url": "https://github.com/vpavlin/basecamp-meshtastic/releases/download/v0.3.3/logos-mesh_gateway_ui-module-linux-amd64.lgx",
-          "size": 34204,
-          "sha256": "756d5123e835d66434cbc373ca0ee425865386a6b9540658c01ff0edd2a4c0de",
-          "rootHash": "a84620537bf68aa6492daefe6394b0c63e328957d6b044329617fc4724df75c1",
+          "releasedAt": "2026-06-29T11:51:14Z",
+          "publisherRef": "mesh_gateway_ui-v0.3.4",
+          "url": "https://github.com/vpavlin/basecamp-meshtastic/releases/download/v0.3.4/logos-mesh_gateway_ui-module-linux-amd64.lgx",
+          "size": 34195,
+          "sha256": "aacbe870112f2da18d592fe7e3a9204c38e523dea746f1e3a1b5e314a67ea53e",
+          "rootHash": "2ddb0364571d59262a58dc3f3ff69baad985f4adac5607775b1039dae9db33ab",
           "manifest": {
             "author": "",
             "category": "network",
             "dependencies": [
-              "mesh_gateway",
-              "qr"
+              "mesh_gateway"
             ],
             "description": "Mesh gateway UI \u2014 pick which of a connected node\u2019s channels to bridge to Logos Messaging",
             "hashes": {
-              "root": "a84620537bf68aa6492daefe6394b0c63e328957d6b044329617fc4724df75c1",
-              "variants": "6a2e047bfa0649e2a0e9e0cfce04062aed1dbef6b33b1154459cea5f2ce9674d",
-              "variants/linux-amd64": "d0f8a0f96f48877c1dfbf7e0ea9184180b79ccb0a6fa6a862d972f79351ed607"
+              "root": "2ddb0364571d59262a58dc3f3ff69baad985f4adac5607775b1039dae9db33ab",
+              "variants": "93c054f2fd615c8155963445e61b221ee16e407217b93fdd084a59002a478f6f",
+              "variants/linux-amd64": "ae33ad089c32254648c2a9320200841e4c62fd78ab9dcf56d6712073302ccb91"
             },
             "icon": "mesh.png",
             "main": {},
             "manifestVersion": "0.2.0",
             "name": "mesh_gateway_ui",
             "type": "ui_qml",
-            "version": "0.3.3",
+            "version": "0.3.4",
             "view": "Main.qml"
+          }
+        }
+      ]
+    },
+    {
+      "name": "qr",
+      "versions": [
+        {
+          "releasedAt": "2026-06-29T11:51:14Z",
+          "publisherRef": "qr-v0.2.0",
+          "url": "https://github.com/xAlisher/qr-basecamp/releases/download/v0.2.0/logos-qr-module-lib.lgx",
+          "size": 3787814,
+          "sha256": "9e6f1342f1dab2d2b52d82dea1d5e62ddab6dc65301d925e48e568543468d29f",
+          "rootHash": "8d64fa2fadb3bdc32cd90063e13e4c04c568ec89f61ecbaae2a63e0f422708ed",
+          "manifest": {
+            "author": "",
+            "category": "tools",
+            "dependencies": [],
+            "description": "QR code generator service \u2014 any module can request a QR matrix for arbitrary text",
+            "hashes": {
+              "root": "8d64fa2fadb3bdc32cd90063e13e4c04c568ec89f61ecbaae2a63e0f422708ed",
+              "variants": "3500acde77fa9a03bd673dc88d2613c2a27e5629df078c69676eca1db489800c",
+              "variants/linux-amd64": "d9f92a7cce0ef42f6d61e4e1ed4cc6b6e387eab79c393dbaba0ea47fc684837d"
+            },
+            "icon": "",
+            "main": {
+              "linux-amd64": "qr_plugin.so"
+            },
+            "manifestVersion": "0.2.0",
+            "name": "qr",
+            "type": "core",
+            "version": "0.2.0"
           }
         }
       ]
