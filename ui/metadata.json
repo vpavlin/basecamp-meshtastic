@@ -1,6 +1,6 @@
 {
   "name": "mesh_gateway_ui",
-  "version": "1.0.0",
+  "version": "0.3.3",
   "type": "ui_qml",
   "category": "network",
   "description": "Mesh gateway UI — pick which of a connected node’s channels to bridge to Logos Messaging",
