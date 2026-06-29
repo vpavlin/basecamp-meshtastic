@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "name": "basecamp-meshtastic",
+  "displayName": "Basecamp Mesh Gateway",
+  "description": "Meshtastic + MeshCore <-> Logos Messaging gateway (mesh_gateway + UI).",
+  "homepage": "https://github.com/vpavlin/basecamp-meshtastic",
+  "indexUrl": "https://raw.githubusercontent.com/vpavlin/basecamp-meshtastic/master/repo/index.json",
+  "trustedSigners": []
+}

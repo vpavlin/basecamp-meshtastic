@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "repositoryName": "basecamp-meshtastic",
+  "generatedAt": "2026-06-29T10:57:29Z",
+  "packages": [
+    {
+      "name": "mesh_gateway",
+      "versions": [
+        {
+          "releasedAt": "2026-06-29T10:57:29Z",
+          "publisherRef": "mesh_gateway-v0.3.2",
+          "url": "https://github.com/vpavlin/basecamp-meshtastic/releases/download/v0.3.2/logos-mesh_gateway-module-lib-linux-amd64.lgx",
+          "size": 6399964,
+          "sha256": "4bd5c0e76ee57dc70770ccc6f69084a3d47ac8d014c3430194d73ce9cbc79820",
+          "rootHash": "932c560776dda073b2bd7957ae19b1d3dfaa74c7d83929c9cfb29c0e3c8d1f36",
+          "manifest": {
+            "author": "",
+            "category": "network",
+            "dependencies": [],
+            "description": "Mesh gateway \u2014 bridge a connected LoRa mesh node (Meshtastic or MeshCore) to/from Logos Messaging",
+            "hashes": {
+              "root": "932c560776dda073b2bd7957ae19b1d3dfaa74c7d83929c9cfb29c0e3c8d1f36",
+              "variants": "a098ef2c86bc3f51a58f83c5cdaa7612816be84c609fe77a379a57abc979e34a",
+              "variants/linux-amd64": "037e4887b1b73daaa90ccf23f8d7c77c44aca170c3f03c1c06593b517657d4cd"
+            },
+            "icon": "",
+            "main": {
+              "linux-amd64": "mesh_gateway_plugin.so"
+            },
+            "manifestVersion": "0.2.0",
+            "name": "mesh_gateway",
+            "type": "core",
+            "version": "0.1.0"
+          }
+        }
+      ]
+    },
+    {
+      "name": "mesh_gateway_ui",
+      "versions": [
+        {
+          "releasedAt": "2026-06-29T10:57:29Z",
+          "publisherRef": "mesh_gateway_ui-v0.3.2",
+          "url": "https://github.com/vpavlin/basecamp-meshtastic/releases/download/v0.3.2/logos-mesh_gateway_ui-module-linux-amd64.lgx",
+          "size": 34205,
+          "sha256": "50b7f773f4c4c2a8be812fde95fa121de1b594750ede2c27b15ab980169dc535",
+          "rootHash": "2c9fa6869a5b59a8514a059e5078ddd181a2f10bddd19cdbcd8d473e57d7539b",
+          "manifest": {
+            "author": "",
+            "category": "network",
+            "dependencies": [
+              "mesh_gateway",
+              "qr"
+            ],
+            "description": "Mesh gateway UI \u2014 pick which of a connected node\u2019s channels to bridge to Logos Messaging",
+            "hashes": {
+              "root": "2c9fa6869a5b59a8514a059e5078ddd181a2f10bddd19cdbcd8d473e57d7539b",
+              "variants": "a135d0269133bc576e33a2a4e42bba6a2e4bb9b1f24d40b8f50748b23927a379",
+              "variants/linux-amd64": "1a0b6f7106a0c8d0ac84292080bb46cb80e17e03852efb3310568d54128458dc"
+            },
+            "icon": "mesh.png",
+            "main": {},
+            "manifestVersion": "0.2.0",
+            "name": "mesh_gateway_ui",
+            "type": "ui_qml",
+            "version": "1.0.0",
+            "view": "Main.qml"
+          }
+        }
+      ]
+    }
+  ]
+}
