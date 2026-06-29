@@ -1,0 +1,43 @@
+name: "MeshCore companion-protocol codec — build & verify"
+output: meshcore-codec.md
+
+intro: |
+  The MeshCore backend speaks the Companion Radio protocol over USB serial. That wire
+  protocol — frame framing plus every command/response layout — lives in a **dependency-free
+  C++ codec** (`gateway/src/meshcore_protocol.{h,cpp}`) with a standalone unit test: no Qt,
+  no gateway build, no hardware.
+
+  This doctest clones the repo, compiles the codec test with nothing but `g++`, and runs it —
+  so the protocol behaviour is *verified*, not merely described.
+
+what_you_build: "A compiled codec test binary that exercises USB framing (including partial/multi-frame streams) and every command/response layout."
+
+what_you_learn:
+  - How the MeshCore companion-protocol codec is isolated so it can be tested without Qt or hardware
+  - How to build and run the codec unit test with a single g++ command
+
+prerequisites:
+  - "**g++** with C++17 support and **git**."
+
+sections:
+  - title: "Get the source"
+    step: true
+    text: |
+      Clone the gateway repository.
+    steps:
+      - title: "Clone the repo"
+        run: "git clone --depth 1 https://github.com/vpavlin/basecamp-meshtastic"
+
+  - title: "Build and run the codec test"
+    step: true
+    text: |
+      The test is self-contained — compile the codec and the test together, then run it.
+      It exercises command byte layouts, USB framing (incl. partial/multi-frame streams),
+      and response parsing against the layouts declared in `meshcore_protocol.h`.
+    steps:
+      - title: "Compile"
+        run: "cd basecamp-meshtastic/gateway/tests && g++ -std=c++17 -I../src ../src/meshcore_protocol.cpp test_meshcore_protocol.cpp -o codec_test"
+      - title: "Run — every case must pass"
+        run: "cd basecamp-meshtastic/gateway/tests && ./codec_test"
+        expect_contains:
+          - "0 failed"
