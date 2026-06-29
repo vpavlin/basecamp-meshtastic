@@ -2,8 +2,8 @@
   description = "Mesh gateway UI — choose which mesh channels to bridge to Logos Messaging";
 
   inputs = {
-    # Same pinned rev as gateway/flake.nix (ABI-compatible with the current logos_host).
-    logos-module-builder.url = "github:logos-co/logos-module-builder/434b98ade6353efdae90083b00f20c8a8ba50ad7";
+    # Same pinned rev as gateway/flake.nix — logos-basecamp 0.2.0-RC3's module-builder (ABI match).
+    logos-module-builder.url = "github:logos-co/logos-module-builder/b0e41abf3e14c0534b41933c5f8e3fc697319037";
   };
 
   outputs = inputs@{ logos-module-builder, ... }:
