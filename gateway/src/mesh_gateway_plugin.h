@@ -15,6 +15,7 @@ class LogosAPI;
 class LogosAPIClient;
 class LogosObject;
 class QSerialPort;
+class QTimer;
 class MeshCoreRadio;
 
 // Bridges a connected Meshtastic node's LoRa channels to/from Logos Messaging topics.
@@ -115,6 +116,12 @@ private:
     // Meshtastic node over USB serial — speak the StreamAPI directly (QtSerialPort + protobuf),
     // in-process. Same data the stoa Python bridge reads. The radio decrypts on-air traffic, so
     // over serial we only ever handle plaintext (no crypto here).
+    // Backend selection. MESH_PROTOCOL forces a backend; unset => auto-detect via probeProtocol().
+    void probeProtocol();         // sniff the attached node's framing, then start the matching backend
+    void onProbeReadyRead();      // probe replies: framed RESP_SELF_INFO -> MeshCore, 0x94c3 -> Meshtastic
+    void startMeshCore();         // wire + start the MeshCore backend
+    void startMeshtastic();       // start the inline Meshtastic StreamAPI backend
+
     void openSerial();                                       // (re)connect + send want_config
     void sendWantConfig();                                   // (re)send want_config until config_complete
     void onSerialReadyRead();                                // frame parser: 0x94 0xc3 <len> <pb>
@@ -132,6 +139,10 @@ private:
     int m_deliveryTries = 0;                // bounded connect retries
     MeshCoreRadio* m_mcRadio = nullptr;     // MeshCore backend (when meshProtocol=meshcore)
     bool m_useMeshCore = false;             // true: drive m_mcRadio instead of the inline Meshtastic serial
+    QSerialPort* m_probeSerial = nullptr;   // temp port for protocol auto-detect (released once detected)
+    QTimer* m_probeTimer = nullptr;         // resends both handshakes until a recognizable frame arrives
+    QByteArray m_probeBuf;                  // accumulates probe replies for framing detection
+    int m_probeTries = 0;                   // bounded probe handshake resends
     QSerialPort* m_serial = nullptr;        // USB link to the Meshtastic node
     QByteArray m_rxBuf;                      // StreamAPI byte accumulator (0x94 0xc3 framing)
     QJsonArray m_cfgChannels;               // channels gathered during the want_config burst

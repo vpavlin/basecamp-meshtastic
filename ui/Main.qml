@@ -341,7 +341,7 @@ Item {
     Timer { id: configMsgTimer; interval: 3500; onTriggered: root.configMsg = "" }
     // Heartbeat watchdog: the gateway pushes status every 5s; if none for >15s the backend is gone.
     Timer { interval: 3000; running: true; repeat: true
-            onTriggered: root.backendStale = root.lastStatusMs > 0 && (Date.now() - root.lastStatusMs) > 15000 }
+            onTriggered: root.backendStale = root.lastStatusMs > 0 && (Date.now() - root.lastStatusMs) > 20000 }
     Connections {
         target: typeof logos !== "undefined" ? logos : null
         ignoreUnknownSignals: true
