@@ -1,6 +1,6 @@
 {
   "name": "mesh_gateway",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "type": "core",
   "category": "network",
   "description": "Mesh gateway — bridge a connected LoRa mesh node (Meshtastic or MeshCore) to/from Logos Messaging",

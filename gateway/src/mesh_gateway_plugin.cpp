@@ -46,44 +46,179 @@ void MeshGatewayPlugin::initLogos(LogosAPI* api)
 
     // Liveness heartbeat: re-push status every 5s. If this host dies or hangs, the pulse stops
     // and the UI flips the node indicator to "not responding" (client-side staleness detection).
-    { auto* hb = new QTimer(this); connect(hb, &QTimer::timeout, this, [this]() { emitStatus(); }); hb->start(5000); }
+    // NOTE: create the timer on the plugin's OWN thread. initLogos runs on the QRO reply thread, so a
+    // QTimer made directly here is affined to that thread and fires unreliably — which left the UI
+    // flashing "Backend not responding" during idle periods (when the heartbeat is the only status
+    // source). Deferring via singleShot(0,this,…) runs the lambda on this object's thread (same pattern
+    // as initDelivery/openSerial above), giving a dependable 5s pulse.
+    QTimer::singleShot(0, this, [this]() {
+        auto* hb = new QTimer(this);
+        connect(hb, &QTimer::timeout, this, [this]() { emitStatus(); });
+        hb->start(5000);
+    });
 
-    // Mesh backend selection: Meshtastic (StreamAPI, inline below) is the default; MESH_PROTOCOL=meshcore
-    // drives the MeshCore companion protocol via MeshCoreRadio. The LM relay / encryption / dedup / DB /
-    // UI layer is protocol-agnostic, so a MeshCore backend plugs into the same rebuildChannelsFromMesh +
-    // onMeshMessage path. The channel object MeshCoreRadio emits is exactly what rebuildChannelsFromMesh
-    // expects ({channelIndex,name,psk,role}), and sendToMesh()/the admin ops branch on m_useMeshCore.
-    m_useMeshCore = (qgetenv("MESH_PROTOCOL").toLower() == "meshcore");
-    if (m_useMeshCore) {
-        qInfo() << "mesh_gateway: mesh backend = MeshCore (companion protocol)";
-        m_mcRadio = new MeshCoreRadio(this);
-        connect(m_mcRadio, &MeshRadio::channelsDiscovered, this, &MeshGatewayPlugin::rebuildChannelsFromMesh);
-        connect(m_mcRadio, &MeshRadio::meshMessage, this, &MeshGatewayPlugin::onMeshMessage);
-        connect(m_mcRadio, &MeshRadio::linkStateChanged, this,
-                [this](const QString& s, bool present, const QString& name) {
-            m_linkState = s; m_nodePresent = present; if (!name.isEmpty()) m_nodeName = name;
-            emitStatus();
-        });
-        connect(m_mcRadio, &MeshRadio::nodesDiscovered, this,
-                [this](const QJsonArray& nodes, int total, int online) {
-            // MeshCore backend supplies a ready node list (self + contacts); feed it through the
-            // shared m_nodes/emitNodes path so the Nodes view renders identically to Meshtastic.
-            m_nodes.clear();
-            for (const QJsonValue& v : nodes) {
-                const QJsonObject o = v.toObject();
-                const quint32 num = quint32(o.value("num").toDouble());
-                if (o.value("isSelf").toBool()) m_myNum = num;
-                m_nodes[num] = o;
+    // Mesh backend selection. MESH_PROTOCOL forces a backend (meshcore|meshtastic); with it UNSET we
+    // AUTO-DETECT by probing the attached node's serial framing (see probeProtocol). The LM relay /
+    // encryption / dedup / DB / UI layer is protocol-agnostic, so whichever backend wins plugs into the
+    // same rebuildChannelsFromMesh + onMeshMessage path; sendToMesh()/the admin ops branch on m_useMeshCore.
+    const QByteArray envProto = qgetenv("MESH_PROTOCOL").toLower();
+    if (envProto == "meshcore")
+        QTimer::singleShot(0, this, [this]() { startMeshCore(); });
+    else if (envProto == "meshtastic")
+        QTimer::singleShot(0, this, [this]() { startMeshtastic(); });
+    else
+        QTimer::singleShot(0, this, [this]() { probeProtocol(); });
+}
+
+void MeshGatewayPlugin::startMeshCore()
+{
+    m_useMeshCore = true;
+    qInfo() << "mesh_gateway: mesh backend = MeshCore (companion protocol)";
+    m_mcRadio = new MeshCoreRadio(this);
+    connect(m_mcRadio, &MeshRadio::channelsDiscovered, this, &MeshGatewayPlugin::rebuildChannelsFromMesh);
+    connect(m_mcRadio, &MeshRadio::meshMessage, this, &MeshGatewayPlugin::onMeshMessage);
+    connect(m_mcRadio, &MeshRadio::linkStateChanged, this,
+            [this](const QString& s, bool present, const QString& name) {
+        m_linkState = s; m_nodePresent = present; if (!name.isEmpty()) m_nodeName = name;
+        emitStatus();
+    });
+    connect(m_mcRadio, &MeshRadio::nodesDiscovered, this,
+            [this](const QJsonArray& nodes, int total, int online) {
+        // MeshCore backend supplies a ready node list (self + contacts); feed it through the
+        // shared m_nodes/emitNodes path so the Nodes view renders identically to Meshtastic.
+        m_nodes.clear();
+        for (const QJsonValue& v : nodes) {
+            const QJsonObject o = v.toObject();
+            const quint32 num = quint32(o.value("num").toDouble());
+            if (o.value("isSelf").toBool()) m_myNum = num;
+            m_nodes[num] = o;
+        }
+        m_nodesTotal = total; m_nodesOnline = online;
+        emitNodes();
+        emitStatus();
+    });
+    m_mcRadio->start();
+}
+
+void MeshGatewayPlugin::startMeshtastic()
+{
+    m_useMeshCore = false;
+    qInfo() << "mesh_gateway: mesh backend = Meshtastic (StreamAPI)";
+    openSerial();
+}
+
+// Auto-detect the attached firmware when MESH_PROTOCOL is unset: open the (autodetected) USB port and
+// send BOTH handshakes, then watch which framing replies. MeshCore Companion answers APP_START with a
+// framed RESP_SELF_INFO ('>'+len+0x05…); Meshtastic StreamAPI streams 0x94 0xc3 frames. Each handshake
+// is inert to the other firmware (reads as noise to the wrong parser), so probing is safe. Opening a
+// USB-CDC port resets the ESP32-S3, so early sends are often lost — we resend on a timer until a
+// recognizable frame arrives, then release the port and hand off to the real backend.
+void MeshGatewayPlugin::probeProtocol()
+{
+    if (!m_probeSerial) {
+        QString port = qEnvironmentVariable("MESHCORE_DEV");
+        if (port.isEmpty()) port = qEnvironmentVariable("MESHTASTIC_DEV");
+        if (port.isEmpty()) {
+            for (const QSerialPortInfo& info : QSerialPortInfo::availablePorts()) {
+                const quint16 vid = info.vendorIdentifier();
+                const QString d = (info.manufacturer() + " " + info.description()).toLower();
+                if (vid == 0x303a || vid == 0x10c4 || vid == 0x1a86 ||   // Espressif / SiLabs / CH34x
+                    d.contains("heltec") || d.contains("meshcore") || d.contains("meshtastic")) {
+                    port = info.systemLocation();
+                    break;
+                }
             }
-            m_nodesTotal = total; m_nodesOnline = online;
-            emitNodes();
+        }
+        if (port.isEmpty()) {
+            if (m_serialTries++ % 6 == 0)
+                qInfo() << "mesh_gateway: autodetect — no serial device found, waiting";
+            m_nodePresent = false; m_linkState = "searching"; emitStatus();
+            QTimer::singleShot(5000, this, [this]() { probeProtocol(); });
+            return;
+        }
+        m_probeSerial = new QSerialPort(this);
+        m_probeSerial->setPortName(port);
+        m_probeSerial->setBaudRate(QSerialPort::Baud115200);
+        connect(m_probeSerial, &QSerialPort::readyRead, this, [this]() { onProbeReadyRead(); });
+        if (!m_probeSerial->open(QIODevice::ReadWrite)) {
+            qWarning() << "mesh_gateway: autodetect cannot open" << port << "—" << m_probeSerial->errorString();
+            m_linkState = (m_probeSerial->error() == QSerialPort::PermissionError) ? "noperm" : "searching";
             emitStatus();
-        });
-        QTimer::singleShot(0, this, [this]() { m_mcRadio->start(); });
-    } else {
-        // Connect to the Meshtastic radio over USB serial.
-        QTimer::singleShot(0, this, [this]() { openSerial(); });
+            m_probeSerial->deleteLater(); m_probeSerial = nullptr;
+            QTimer::singleShot(3000, this, [this]() { probeProtocol(); });
+            return;
+        }
+        qInfo() << "mesh_gateway: autodetecting mesh protocol on" << port;
+        m_linkState = "connecting"; emitStatus();
+        m_probeBuf.clear();
+        m_probeTries = 0;
     }
+
+    // (Re)send both handshakes.
+    m_probeSerial->write(QByteArray(32, char(0xc3)));        // Meshtastic START2 wake/resync
+    {
+        meshtastic::ToRadio toRadio;
+        toRadio.set_want_config_id(0x6d657368u);            // "mesh"
+        const std::string pb = toRadio.SerializeAsString();
+        QByteArray mt;
+        mt.append(char(0x94)); mt.append(char(0xc3));        // StreamAPI frame: 0x94 0xc3 <len16> <pb>
+        mt.append(char((int(pb.size()) >> 8) & 0xFF));
+        mt.append(char(int(pb.size()) & 0xFF));
+        mt.append(pb.data(), int(pb.size()));
+        m_probeSerial->write(mt);
+    }
+    {
+        const meshcore::Bytes tx = meshcore::wrapTx(meshcore::cmdAppStart("logos-gw"));   // MeshCore APP_START
+        m_probeSerial->write(QByteArray(reinterpret_cast<const char*>(tx.data()), int(tx.size())));
+    }
+
+    if (!m_probeTimer) {
+        m_probeTimer = new QTimer(this);
+        connect(m_probeTimer, &QTimer::timeout, this, [this]() {
+            if (m_probeSerial && m_probeSerial->isOpen()) {
+                if (m_probeTries++ % 8 == 0)
+                    qInfo() << "mesh_gateway: autodetect — no recognizable frames yet, retrying";
+                probeProtocol();    // resend handshakes (re-enters; port already open)
+            }
+        });
+    }
+    m_probeTimer->start(2500);
+}
+
+void MeshGatewayPlugin::onProbeReadyRead()
+{
+    if (!m_probeSerial) return;
+    m_probeBuf += m_probeSerial->readAll();
+
+    QString detected;
+    // MeshCore first (most specific): APP_START is answered by a framed RESP_SELF_INFO.
+    {
+        meshcore::FrameReader fr;
+        fr.feed(reinterpret_cast<const uint8_t*>(m_probeBuf.constData()), size_t(m_probeBuf.size()));
+        while (auto f = fr.next()) {
+            if (meshcore::frameType(*f) == meshcore::RESP_SELF_INFO) { detected = "meshcore"; break; }
+        }
+    }
+    // Meshtastic: StreamAPI frame magic 0x94 0xc3.
+    if (detected.isEmpty()) {
+        for (int i = 0; i + 1 < m_probeBuf.size(); ++i) {
+            if ((quint8)m_probeBuf[i] == 0x94 && (quint8)m_probeBuf[i + 1] == 0xc3) { detected = "meshtastic"; break; }
+        }
+    }
+    if (detected.isEmpty()) {
+        if (m_probeBuf.size() > 8192) m_probeBuf = m_probeBuf.right(2048);   // bound the sniff buffer
+        return;
+    }
+
+    qInfo() << "mesh_gateway: autodetected mesh protocol =" << detected;
+    if (m_probeTimer) m_probeTimer->stop();
+    m_probeSerial->close();
+    m_probeSerial->deleteLater();
+    m_probeSerial = nullptr;
+    m_probeBuf.clear();
+
+    if (detected == "meshcore") startMeshCore();
+    else                        startMeshtastic();
 }
 
 // REAL derivation (final): only someone holding the channel name+psk can compute the topic, so it
